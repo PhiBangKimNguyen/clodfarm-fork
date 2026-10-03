@@ -1,0 +1,20 @@
+name: Pinned dogfood runtime
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build credential-free Linux candidate
+        run: >-
+          docker build --platform linux/amd64 -f Dockerfile.dogfood
+          --build-arg FARM_REVISION="$GITHUB_SHA" -t clodfarm-dogfood:check .
+      - name: Verify pinned native versions and fork source without network
+        run: |
+          docker run --rm --network=none --read-only clodfarm-dogfood:check claude --version | grep -F '2.1.288'
+          docker run --rm --network=none --read-only clodfarm-dogfood:check codex --version | grep -F '0.160.0'
+          docker run --rm --network=none --read-only clodfarm-dogfood:check python -c 'import os; from clodfarm.upgrade import REPO; assert REPO == "https://github.com/PhiBangKimNguyen/clodfarm-fork"; assert os.environ["FARM_CLAUDE_UPDATE"] == "0"'
