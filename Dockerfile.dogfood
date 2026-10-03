@@ -14,7 +14,7 @@ ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates git python3 python3-venv tini \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd -m -u 10001 farm \
+    && useradd -m -u 10001 farm && chage -d 0 farm \
     && mkdir -p /workspace /home/farm/.claude /home/farm/.codex \
     && chown -R farm:farm /workspace /home/farm
 COPY requirements-dogfood.txt /tmp/requirements.txt
@@ -31,8 +31,11 @@ COPY clodfarm /src/clodfarm
 RUN pip install --no-compile --no-cache-dir --no-build-isolation --no-deps /src \
     && rm -rf /src /tmp/requirements.txt \
     && python -c 'from clodfarm.upgrade import REPO; assert REPO == "https://github.com/PhiBangKimNguyen/clodfarm-fork"' \
-    && find /opt/clodfarm -type f -name '*.pyc' -delete \
-    && find /opt/clodfarm -depth -type d -name __pycache__ -empty -delete
+    && find /opt/clodfarm /usr/lib/python3.11 -type f -name '*.pyc' -delete \
+    && find /opt/clodfarm /usr/lib/python3.11 -depth -type d -name __pycache__ -empty -delete \
+    && rm -rf /root/.npm /root/.cache /home/farm/.codex/tmp /tmp/node-compile-cache \
+    && rm -f /var/cache/ldconfig/aux-cache /etc/passwd- /etc/group- /etc/shadow- /etc/gshadow- \
+    && find /var/log -type f -exec truncate -s 0 {} +
 USER 10001:10001
 WORKDIR /workspace
 ENTRYPOINT ["/usr/bin/tini", "--"]
