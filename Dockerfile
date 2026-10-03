@@ -13,7 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PATH=/home/farm/.local/bin:/opt/clodfarm/bin:$PATH \
     CLAUDE_CONFIG_DIR=/home/farm/.claude \
     DISABLE_AUTOUPDATER=1 \
-    FARM_CLAUDE_UPDATE=3600 \
+    FARM_CLAUDE_UPDATE=0 \
     FARM_WORKSPACE=/workspace \
     PYTHONUNBUFFERED=1
 

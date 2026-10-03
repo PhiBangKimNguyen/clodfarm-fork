@@ -21,7 +21,7 @@ import time
 
 from . import __version__, boot, procs
 
-REPO = "https://github.com/matank001/clodfarm"
+REPO = "https://github.com/PhiBangKimNguyen/clodfarm-fork"
 KEEP = 3
 
 

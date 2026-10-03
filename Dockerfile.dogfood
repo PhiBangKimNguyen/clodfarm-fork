@@ -1,0 +1,37 @@
+# Credential-free, version-pinned Linux candidate for AgentRunway F1a.
+# This does not implement the F1b/F1c/F1d authority or admission boundaries.
+FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c
+ARG FARM_REVISION
+LABEL org.opencontainers.image.source="https://github.com/PhiBangKimNguyen/clodfarm-fork" \
+      org.opencontainers.image.revision="${FARM_REVISION}"
+ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8 \
+    PATH=/opt/clodfarm/bin:$PATH PYTHONUNBUFFERED=1 \
+    DISABLE_AUTOUPDATER=1 FARM_CLAUDE_UPDATE=0 FARM_PUSH=0 \
+    FARM_REMOTE_CONTROL=0 FARM_USAGE_REFRESH=0 FARM_UI=0 \
+    FARM_WORKSPACE=/workspace CLAUDE_CONFIG_DIR=/home/farm/.claude \
+    CODEX_HOME=/home/farm/.codex
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates git python3 python3-venv tini \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -m -u 10001 farm \
+    && mkdir -p /workspace /home/farm/.claude /home/farm/.codex \
+    && chown -R farm:farm /workspace /home/farm
+COPY requirements-dogfood.txt /tmp/requirements.txt
+RUN python3 -m venv /opt/clodfarm \
+    && pip install --no-cache-dir --require-hashes -r /tmp/requirements.txt
+# Official, unmodified CLI packages; no login or inference during build.
+RUN npm install -g --no-fund --no-audit \
+      @anthropic-ai/claude-code@2.1.288 @openai/codex@0.160.0 \
+    && npm cache clean --force \
+    && claude --version | grep -F '2.1.288' \
+    && codex --version | grep -F '0.160.0'
+COPY pyproject.toml README.md /src/
+COPY clodfarm /src/clodfarm
+RUN pip install --no-cache-dir --no-build-isolation --no-deps /src \
+    && rm -rf /src /tmp/requirements.txt \
+    && python -c 'from clodfarm.upgrade import REPO; assert REPO == "https://github.com/PhiBangKimNguyen/clodfarm-fork"'
+USER 10001:10001
+WORKDIR /workspace
+ENTRYPOINT ["/usr/bin/tini", "--"]
+# No daemon, schedules, UI or inference: F1a is an offline foundation.
+CMD ["python", "-c", "import time; time.sleep(86400)"]
