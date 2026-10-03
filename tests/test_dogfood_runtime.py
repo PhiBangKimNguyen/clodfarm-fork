@@ -1,4 +1,5 @@
 """Pin/source regressions, without login, network calls or starting agents."""
+import json
 from pathlib import Path
 
 from clodfarm import config, upgrade
@@ -19,7 +20,9 @@ def test_updates_default_off(monkeypatch):
 
 def test_dogfood_has_exact_native_cli_versions():
     dockerfile = (Path(__file__).resolve().parents[1] / "Dockerfile.dogfood").read_text()
-    assert "@anthropic-ai/claude-code@2.1.288" in dockerfile
-    assert "@openai/codex@0.160.0" in dockerfile
+    package = json.loads((Path(__file__).resolve().parents[1] / "dogfood-cli/package.json").read_text())
+    assert package["dependencies"]["@anthropic-ai/claude-code"] == "2.1.288"
+    assert package["dependencies"]["@openai/codex"] == "0.160.0"
+    assert "npm ci" in dockerfile
     assert "@latest" not in dockerfile
     assert "node:22-bookworm-slim@sha256:" in dockerfile

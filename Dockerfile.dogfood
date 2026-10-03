@@ -5,7 +5,7 @@ ARG FARM_REVISION
 LABEL org.opencontainers.image.source="https://github.com/PhiBangKimNguyen/clodfarm-fork" \
       org.opencontainers.image.revision="${FARM_REVISION}"
 ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8 \
-    PATH=/opt/clodfarm/bin:$PATH PYTHONUNBUFFERED=1 \
+    PATH=/opt/cli/node_modules/.bin:/opt/clodfarm/bin:$PATH PYTHONUNBUFFERED=1 \
     DISABLE_AUTOUPDATER=1 FARM_CLAUDE_UPDATE=0 FARM_PUSH=0 \
     FARM_REMOTE_CONTROL=0 FARM_USAGE_REFRESH=0 FARM_UI=0 \
     FARM_WORKSPACE=/workspace CLAUDE_CONFIG_DIR=/home/farm/.claude \
@@ -20,8 +20,8 @@ COPY requirements-dogfood.txt /tmp/requirements.txt
 RUN python3 -m venv /opt/clodfarm \
     && pip install --no-cache-dir --require-hashes -r /tmp/requirements.txt
 # Official, unmodified CLI packages; no login or inference during build.
-RUN npm install -g --no-fund --no-audit \
-      @anthropic-ai/claude-code@2.1.288 @openai/codex@0.160.0 \
+COPY dogfood-cli/package.json dogfood-cli/package-lock.json /opt/cli/
+RUN npm ci --prefix /opt/cli --no-fund --no-audit \
     && npm cache clean --force \
     && claude --version | grep -F '2.1.288' \
     && codex --version | grep -F '0.160.0'
