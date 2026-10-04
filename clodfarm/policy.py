@@ -4,8 +4,8 @@ The choice is kept in the store (``CLAUDE/<id>``, see store.py) and copied to ``
 Claude Code config dir, so the PreToolUse hook (``clodfarm hook``, run before every tool call) decides without a
 round trip. A change applies to the next tool call, in every session, without a restart.
 
-Tools come in groups, the way a person thinks of them. Read, Glob and Grep are always allowed. A Claude without the
-shell still runs `clodfarm ...` commands: that is how it talks to the farm.
+Tools come in groups, the way a person thinks of them. This legacy policy is for
+trusted Claudes only. Tier 0 uses the closed executor in tier0.py.
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
-import re
 
 POLICY_FILE = "farm-policy.json"
 
@@ -30,7 +29,6 @@ GROUPS: dict[str, tuple[str, list[str]]] = {
 }
 # built-in tools that --disallowedTools can name as they are (the hook covers the shell and MCP patterns)
 _FLAGGABLE = {"edit", "web", "agents", "messaging"}
-FARM_COMMAND = re.compile(r"^\s*(?:[A-Z_][A-Z0-9_]*=\S*\s+)*(?:\S*/)?clodfarm(?:\s|$)")
 
 
 def groups_view() -> list[dict]:
@@ -97,13 +95,9 @@ def decide(pol: dict, tool: str, tool_input: dict | None = None) -> tuple[bool, 
     g = _group_of(tool)  # the browser's tools are their own group: "other MCP tools" leaves them on
     if g is None or g not in deny:
         return True, ""
-    if g == "shell" and tool == "Bash":
-        cmd = str((tool_input or {}).get("command") or "")
-        if FARM_COMMAND.match(cmd) and not re.search(r"[;&|`$<>]", cmd):
-            return True, ""  # talking to the farm is always allowed
     label = GROUPS[g][0]
     return False, (f"{label} is turned off for this Claude by its person (farm SETTINGS). Do the work without it, "
-                   f"or ask your person to allow it. `clodfarm ...` commands still work.")
+                   f"or ask your person to allow it.")
 
 
 def hook_output(allowed: bool, reason: str) -> dict | None:

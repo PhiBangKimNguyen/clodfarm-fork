@@ -18,3 +18,12 @@ jobs:
           docker run --rm --network=none --read-only clodfarm-dogfood:check claude --version | grep -F '2.1.288'
           docker run --rm --network=none --read-only clodfarm-dogfood:check codex --version | grep -F '0.160.0'
           docker run --rm --network=none --read-only clodfarm-dogfood:check python -c 'import os; from clodfarm.upgrade import REPO; assert REPO == "https://github.com/PhiBangKimNguyen/clodfarm-fork"; assert os.environ["FARM_CLAUDE_UPDATE"] == "0"'
+      - name: F1c actual container and restart controls
+        run: |
+          image=$(docker image inspect clodfarm-dogfood:check --format '{{.Id}}')
+          python3 scripts/f1c_desktop_smoke.py --image "$image"
+      - name: F1c exact-candidate landing with real isolated verifier
+        run: |
+          pip install -e '.[test]'
+          export F1C_SMOKE_IMAGE=$(docker image inspect clodfarm-dogfood:check --format '{{.Id}}')
+          python -m unittest discover -s tests -p test_f1c.py

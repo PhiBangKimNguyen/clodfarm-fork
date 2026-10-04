@@ -8,3 +8,4 @@ dist
 assets/*.mp4
 assets/*.webp
 node_modules
+.f1c-validation/

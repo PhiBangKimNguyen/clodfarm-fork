@@ -88,6 +88,8 @@ class Farm:
 
     # ------------------------------------------------------------ lifecycle
     def run(self):
+        if os.environ.get("FARM_REQUIRE_ISOLATION") == "1":
+            raise ValueError("Legacy shared runner disabled: use isolated Tier 0 jobs and trusted F1c services")
         if threading.current_thread() is threading.main_thread():
             signal.signal(signal.SIGTERM, lambda *_: self.stop.set())
             signal.signal(signal.SIGINT, lambda *_: self.stop.set())
@@ -912,6 +914,8 @@ class Farm:
         """Put a successful run's commits where they belong. Returns (a line for the task result, outcome):
         outcome is kept (stays on its branch), landed (on main), conflict, verify_failed or stopped (cancelled
         meanwhile: not merged)."""
+        if os.environ.get("FARM_REQUIRE_ISOLATION") == "1":
+            return "Proposal retained; exact-candidate F1c verification and Claude review required", "review_required"
         cfg, store, tid = self.cfg, self.store, task["id"]
         cur = store.get_task(tid) or {}
         more_to_do = int(cur.get("children_open", 0)) > 0 or (

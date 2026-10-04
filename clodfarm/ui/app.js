@@ -3363,7 +3363,23 @@ const UI = {
     const invite = h("div", { class: "mgr-sec" }, h("h3", { text: "INVITE A CLAUDE" }),
       h("p", { class: "muted small", text: "A link for one person: they log in with their Claude account and get their own Claude here, even when the farm is private or hatching is closed." }),
       h("div", { class: "dlg-actions left" }, invBtn), invOut, invErr);
-    fill($("#mgr-body"), managers, invite, planner, privacy, hatching, owners, release);
+    const escalationError = h("p", { class: "form-error", role: "alert" });
+    const escalations = h("div", { class: "mgr-sec" }, h("h3", { text: "WORKER INBOX" }),
+      h("p", { class: "muted small", text: "Questions for parent Claude and decisions for the human manager. Acknowledgement keeps work paused; authorize retry only after resolving the requested authority." }),
+      ...(m.escalations || []).map(item => h("div", { class: "mgr-sec" },
+        h("b", { text: `${item.task} v${item.version} · ${item.destination} · ${item.status}` }),
+        h("p", { text: `${item.worker} · ${item.data_class} · ${item.reason} · ${item.authority} · age ${item.age_seconds}s` }),
+        h("p", { class: "muted small", text: `Evidence SHA256: ${item.evidence}` }),
+        h("p", { class: "muted small", text: item.reviewer ? `Disposition by ${item.reviewer}: ${item.disposition}` : "Awaiting disposition" }),
+        ["pending", "acknowledged"].includes(item.status) ? h("div", { class: "dlg-actions" },
+          ...["acknowledge", "reject", "retry"].map(action => h("button", { class: "btn", type: "button",
+            text: action === "retry" ? "AUTHORIZE RETRY" : action.toUpperCase(), onclick: async () => {
+              try { this.renderManager(await api("api/manager/escalation", { id: item.id, action })); }
+              catch (error) { escalationError.textContent = error.message; }
+            } }))) : null)),
+      !(m.escalations || []).length ? h("p", { class: "muted small", text: "No worker escalations." }) : null,
+      escalationError);
+    fill($("#mgr-body"), managers, escalations, invite, planner, privacy, hatching, owners, release);
   },
 
   // ---------------------------------------------------------------- settings

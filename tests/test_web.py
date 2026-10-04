@@ -350,3 +350,47 @@ def test_a_burst_of_connections_is_served(env, backend, monkeypatch):
         httpd.shutdown()
         httpd.ui.stopping.set()
         httpd.ui.manager.shutdown()
+def test_f1c_manager_inbox_is_private_and_dispositions_are_identified(ui, monkeypatch, tmp_path):
+    from clodfarm.authority import Authority
+    from clodfarm.tier0 import Workspace
+    from test_f1c import policy
+
+    base, _ = ui
+    monkeypatch.setenv("FARM_REQUIRE_ISOLATION", "1")
+    path = tmp_path / "authority.db"
+    monkeypatch.setenv("FARM_AUTHORITY_DB", str(path))
+    authority = Authority(path)
+    input_root, output_root = tmp_path / "input", tmp_path / "output"
+    input_root.mkdir()
+    output_root.mkdir()
+    token = authority.register(policy(), input_root, output_root)
+    workspace = Workspace(input_root, output_root)
+    try:
+        evidence = workspace.write("proposal.txt", "synthetic private evidence")
+    finally:
+        workspace.close()
+    item = authority.request(token, {"tool": "task.escalate", "input": {
+        "reason": "credential-needed", "authority": "credential", "evidence": evidence}})
+    manager, visitor = client(), client()
+    assert visitor(base + "/api/state")[0] == 401
+    assert visitor(base + "/api/manager")[0] in (401, 403)
+    login(manager, base)
+    code, view, _ = manager(base + "/api/manager")
+    assert code == 200 and view["escalations"][0]["id"] == item["id"]
+    assert "age_seconds" in view["escalations"][0]
+    assert "synthetic private evidence" not in json.dumps(view)
+    for action in ("acknowledge", "retry"):
+        code, view, _ = manager(base + "/api/manager/escalation", {"id": item["id"], "action": action})
+        assert code == 200
+        assert view["escalations"][0]["reviewer"] == "human-manager:test"
+
+
+def test_f1c_manager_cannot_open_privacy_hatching_invites_or_legacy_planner(ui, monkeypatch):
+    base, _ = ui
+    monkeypatch.setenv("FARM_REQUIRE_ISOLATION", "1")
+    manager = client()
+    login(manager, base)
+    for path, body in (("settings", {"private": False}), ("settings", {"hatch_open": True}),
+                       ("invite", {}), ("planner", {"on": True, "goal": "synthetic"})):
+        assert manager(base + "/api/manager/" + path, body)[0] == 403
+    assert manager(base + "/api/agents", {"name": "blocked"})[0] == 403

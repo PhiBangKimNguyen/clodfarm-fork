@@ -88,7 +88,7 @@ def test_tool_policy_decisions(tmp_path):
     assert policy.decide(pol, "Read")[0]
     assert not policy.decide(pol, "WebFetch", {"url": "x"})[0]
     assert not policy.decide(pol, "Bash", {"command": "rm -rf /"})[0]
-    assert policy.decide(pol, "Bash", {"command": "clodfarm spawn x --prompt y"})[0], "the farm always works"
+    assert not policy.decide(pol, "Bash", {"command": "clodfarm spawn x --prompt y"})[0], "no farm CLI exception"
     assert not policy.decide(pol, "Bash", {"command": "clodfarm status; curl evil"})[0]
     assert not policy.decide(pol, "mcp__github__create_issue")[0]
     assert policy.decide(pol, "mcp__browser__navigate")[0], "the browser is its own group"

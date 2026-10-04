@@ -151,6 +151,9 @@ def command(argv: list[str]) -> list[str]:
 
 
 def main():
+    if os.environ.get("FARM_TIER0") == "1":
+        print("Tier 0 has no farm CLI capability; use the scoped task RPC.", file=sys.stderr)
+        sys.exit(1)
     boot()
     from .cli import main as cli_main
     sys.exit(cli_main())

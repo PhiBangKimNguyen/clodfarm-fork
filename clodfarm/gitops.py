@@ -200,6 +200,8 @@ def run_check(path: str, cmd: str, timeout: int) -> tuple[bool, str]:
 
 def merge(repo: str, path: str, branch: str, push: bool = True) -> str:
     """Rebase the task branch onto main and fast-forward main. Returns a summary."""
+    if os.environ.get("FARM_REQUIRE_ISOLATION") == "1" or os.environ.get("FARM_TIER0") == "1":
+        raise GitError("Isolated proposals require the trusted F1c landing service")
     with _locked(repo):
         base = main_branch(repo)
         commit_leftovers(path, branch)
