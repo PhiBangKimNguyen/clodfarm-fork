@@ -6,6 +6,8 @@ reads those files, so a new release of the farm can take over a run that is stil
 
 from __future__ import annotations
 
+from .isolation import isolation_required, tier0
+
 import json
 import os
 import re
@@ -44,8 +46,8 @@ class RunResult:
 
 def session_name(cfg, what: str = "") -> str:
     """How a farm session is named in the Claude app and claude.ai/code: always marked [clodfarm]."""
-    who = cfg.name if cfg.name == cfg.farm else f"{cfg.farm} · {cfg.name}"
-    return f"[clodfarm] {who}" + (f" · {what}" if what else "")
+    who = cfg.name if cfg.name == cfg.farm else f"{cfg.farm} Â· {cfg.name}"
+    return f"[clodfarm] {who}" + (f" Â· {what}" if what else "")
 
 
 def build_cmd(cfg, system_prompt: str, resume_session: str | None = None, name: str = "", live: bool = False,
@@ -146,7 +148,7 @@ def start_run(workspace: str, rundir: str, cmd: list[str], cwd: str, env: dict, 
               stdin_null: bool = False) -> RunHandle:
     """Start ``cmd`` through the shim in ``rundir`` (created fresh), with ``stdin`` handed to it first; ``close``
     closes its stdin after that. Returns once the process runs (or failed to start)."""
-    if os.environ.get("FARM_REQUIRE_ISOLATION") == "1" or env.get("FARM_TIER0") == "1":
+    if isolation_required() or tier0(env):
         raise ValueError("Shared run shim and raw environment/transcript persistence disabled for isolated jobs")
     shutil.rmtree(rundir, ignore_errors=True)
     os.makedirs(os.path.join(rundir, "in"), mode=0o700)

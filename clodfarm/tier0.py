@@ -178,7 +178,7 @@ class Workspace:
             fd = os.open(
                 temporary,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                0o600,
+                0o640,
                 dir_fd=parent,
             )
             try:

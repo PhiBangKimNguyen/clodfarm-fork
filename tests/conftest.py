@@ -10,6 +10,12 @@ import pytest
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+@pytest.fixture(autouse=True)
+def legacy_tests_opt_out(monkeypatch):
+    """Existing legacy farm tests explicitly opt out; isolation tests override it."""
+    monkeypatch.setenv("FARM_REQUIRE_ISOLATION", "0")
+
+
 def _free_port():
     s = socket.socket()
     s.bind(("127.0.0.1", 0))

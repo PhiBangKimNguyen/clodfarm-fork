@@ -15,11 +15,12 @@ import sys
 from pathlib import Path
 
 from .authority import Authority, TaskServer
-from .tier0 import require
+from .isolation import tier0
+from .tier0 import load_policy, require
 
 
 def manager_authority():
-    require(os.environ.get("FARM_TIER0") != "1", "worker administration denied")
+    require(not tier0(), "worker administration denied")
     path = os.environ.get("FARM_AUTHORITY_DB", "")
     require(path and Path(path).is_absolute(), "supervisor authority database required")
     return Authority(Path(path))
@@ -33,6 +34,7 @@ def main(argv=None):
     register.add_argument("--input", type=Path, required=True)
     register.add_argument("--output", type=Path, required=True)
     register.add_argument("--token-file", type=Path, required=True)
+    register.add_argument("--policy-sha256", required=True)
     register.add_argument("--public-reads", type=Path)
     serve = sub.add_parser("serve")
     serve.add_argument("--socket", type=Path, required=True)
@@ -44,9 +46,11 @@ def main(argv=None):
     )
     disposition.add_argument("--action", choices=["acknowledge", "reject", "retry"], required=True)
     disposition.add_argument(
-        "--actor", help="Required named operator for human-manager dispositions"
+        "--actor",
+        required=True,
+        help="Named operator or independently checked Claude run reference",
     )
-    for name in ("prepare", "candidate", "review", "land", "revoke"):
+    for name in ("prepare", "candidate", "review", "land", "revoke", "reconcile"):
         p = sub.add_parser(name)
         p.add_argument("--task", required=True)
         p.add_argument("--version", type=int, required=True)
@@ -72,7 +76,7 @@ def main(argv=None):
                 and not args.policy.resolve().is_relative_to(root),
                 "capability/policy inside writable workspace",
             )
-        policy = json.loads(args.policy.read_text())
+        policy = load_policy(args.policy, args.policy_sha256)
         reads = json.loads(args.public_reads.read_text()) if args.public_reads else {}
         require(not args.token_file.exists(), "token file exists")
         token = authority.register(policy, args.input, args.output, reads)
@@ -93,14 +97,19 @@ def main(argv=None):
         if reviewer == "human-manager":
             require(args.actor, "named human operator required")
             reviewer += ":" + args.actor
+        else:
+            reviewer += ":" + args.actor
         authority.disposition(args.id, reviewer, args.action)
     elif args.command == "revoke":
         authority.revoke(args.task, args.version)
     else:
-        from .landing import DockerVerifier, candidate, land, prepare
+        from .landing import DockerVerifier, candidate, land, prepare, reconcile
 
         if args.command == "prepare":
             print(prepare(authority, args.repo, args.task, args.version, args.path))
+            return 0
+        if args.command == "reconcile":
+            print(json.dumps(reconcile(authority, args.repo, args.task, args.version)))
             return 0
         verify = os.environ.get("FARM_VERIFY_CMD", "")
         record = candidate(
@@ -114,12 +123,13 @@ def main(argv=None):
         if args.command == "candidate":
             print(json.dumps(record, indent=2))
         elif args.command == "review":
-            raw = args.claude_evidence.read_bytes()
+            raw = authority.trusted_evidence(args.claude_evidence).read_bytes()
             require(len(raw) <= 262144, "review too large")
             verdict = json.loads(raw)
             require(
                 isinstance(verdict, dict)
-                and set(verdict) == {"task", "version", "candidate", "reviewer", "accepted"},
+                and set(verdict)
+                == {"task", "version", "candidate", "reviewer", "accepted", "reviewer_run"},
                 "exact-candidate Claude verdict required",
             )
             require(
@@ -135,6 +145,7 @@ def main(argv=None):
                 verdict["reviewer"],
                 verdict["accepted"],
                 hashlib.sha256(raw).hexdigest(),
+                verdict["reviewer_run"],
             )
         elif args.command == "land":
             print(

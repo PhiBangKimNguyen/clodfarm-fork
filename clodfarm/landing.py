@@ -85,6 +85,10 @@ def prepare(authority: Authority, repo: Path, task: str, version: int, paths: li
             git(repo, "read-tree", base, env=env)
             for path, content in files.items():
                 require(not path.startswith("-"), "option path denied")
+                require(
+                    not any(p in (".gitattributes", ".gitmodules") for p in path.split("/")),
+                    "Git configuration proposal denied",
+                )
                 blob = (
                     git(repo, "hash-object", "-w", "--stdin", data=content, env=env)
                     .decode()
@@ -195,6 +199,58 @@ class DockerVerifier:
                 )
 
 
+def _landing_state(db, authority, repo, task, version, verify_cmd, verifier):
+    job = db.execute("SELECT * FROM jobs WHERE task=? AND version=?", (task, version)).fetchone()
+    require(job and job["status"] == "proposed", "task not proposed")
+    require(
+        not db.execute(
+            "SELECT 1 FROM landings WHERE task=? AND version=?", (task, version)
+        ).fetchone(),
+        "already landed",
+    )
+    require(
+        not db.execute("SELECT 1 FROM landing_intents").fetchone(),
+        "landing reconciliation required",
+    )
+    record = candidate(repo, f"farm/{task}-v{version}", task, version, verify_cmd, verifier.image)
+    review = db.execute(
+        "SELECT * FROM reviews WHERE task=? AND version=?", (task, version)
+    ).fetchone()
+    require(
+        review
+        and review["accepted"] == 1
+        and review["reviewer"] == "parent-claude"
+        and review["candidate"] == record["identity"]
+        and review["reviewer_run"]
+        and review["reviewer_run"].split(":", 1)[-1] != json.loads(job["policy"])["worker"],
+        "missing or stale Claude review",
+    )
+    require(
+        git(repo, "symbolic-ref", "HEAD").decode().strip() == "refs/heads/main",
+        "main checkout required",
+    )
+    require(not git(repo, "status", "--porcelain"), "main worktree dirty")
+    # Host-configured smudge/clean filters must never execute candidate attributes.
+    filters = subprocess.run(
+        ["git", "-C", str(repo), "config", "--get-regexp", r"^filter\."],
+        capture_output=True,
+        timeout=60,
+    )
+    require(filters.returncode == 1 and not filters.stdout, "host Git filters denied")
+    return record
+
+
+def _finish(db, task, version, record):
+    db.execute(
+        "INSERT INTO landings VALUES (?,?,?,?)", (task, version, record["candidate"], time.time())
+    )
+    db.execute(
+        "UPDATE jobs SET status='landed',token_hash=NULL WHERE task=? AND version=?",
+        (task, version),
+    )
+    db.execute("DELETE FROM landing_intents WHERE task=? AND version=?", (task, version))
+
+
 def land(
     authority: Authority,
     repo: Path,
@@ -207,56 +263,64 @@ def land(
 
     require(isinstance(verifier, DockerVerifier), "isolated verifier required")
     require(os.environ.get("FARM_PUSH") == "0", "FARM_PUSH=0 required")
-    branch = f"farm/{task}-v{version}"
-    with _locked(str(repo)), authority.connect() as db:
-        db.execute("BEGIN IMMEDIATE")
-        job = db.execute(
-            "SELECT * FROM jobs WHERE task=? AND version=?", (task, version)
-        ).fetchone()
-        require(job and job["status"] == "proposed", "task not proposed")
-        require(
-            not db.execute(
-                "SELECT 1 FROM landings WHERE task=? AND version=?", (task, version)
-            ).fetchone(),
-            "already landed",
-        )
-        record = candidate(repo, branch, task, version, verify_cmd, verifier.image)
-        review = db.execute(
-            "SELECT * FROM reviews WHERE task=? AND version=?", (task, version)
-        ).fetchone()
-        require(
-            review
-            and review["accepted"] == 1
-            and review["reviewer"] == "parent-claude"
-            and review["candidate"] == record["identity"]
-            and json.loads(job["policy"])["worker"] != review["reviewer"],
-            "missing or stale Claude review",
-        )
-        require(
-            git(repo, "symbolic-ref", "HEAD").decode().strip() == "refs/heads/main",
-            "main checkout required",
-        )
-        require(not git(repo, "status", "--porcelain"), "main worktree dirty")
+    # Verification may take minutes. It never holds a database write transaction.
+    with _locked(str(repo)):
+        with authority.connect() as db:
+            record = _landing_state(db, authority, repo, task, version, verify_cmd, verifier)
         require(verifier(repo, record, verify_cmd) is True, "verification failed")
-        require(
-            candidate(repo, branch, task, version, verify_cmd, verifier.image) == record,
-            "candidate changed during verification",
-        )
-        require(not git(repo, "status", "--porcelain"), "main changed during verification")
-        # Ref compare-and-swap also rejects callers outside our Git lock. The
-        # candidate is a direct child of the exact reviewed base.
+        with authority.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            current = _landing_state(db, authority, repo, task, version, verify_cmd, verifier)
+            require(current == record, "candidate changed during verification")
+            db.execute(
+                "INSERT INTO landing_intents VALUES (?,?,?,?,?,?)",
+                (task, version, record["identity"], record["base"], record["commit"], time.time()),
+            )
+            db.execute(
+                "UPDATE jobs SET status='landing',token_hash=NULL WHERE task=? AND version=?",
+                (task, version),
+            )
+        # The committed intent survives crashes and reset errors. Further landings
+        # are blocked until the trusted operator reconciles main against it.
         git(repo, "update-ref", "refs/heads/main", record["commit"], record["base"])
         git(repo, "-c", "core.hooksPath=/dev/null", "reset", "--hard", record["commit"])
-        db.execute(
-            "INSERT INTO landings VALUES (?,?,?,?)",
-            (task, version, record["identity"], time.time()),
-        )
-        db.execute(
-            "UPDATE jobs SET status='landed',token_hash=NULL WHERE task=? AND version=?",
-            (task, version),
-        )
+        with authority.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            _finish(db, task, version, {"candidate": record["identity"]})
         return {
             "status": "landed-locally",
             "commit": record["commit"],
             "candidate": record["identity"],
         }
+
+
+def reconcile(authority: Authority, repo: Path, task: str, version: int):
+    """Record a completed ref transition or retain a failed pre-CAS proposal.
+
+    Never resets a dirty checkout or silently overwrites operator work. If reset
+    failed, the operator must inspect/repair the checkout separately first.
+    """
+    from .gitops import _locked
+
+    with _locked(str(repo)), authority.connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        intent = db.execute(
+            "SELECT * FROM landing_intents WHERE task=? AND version=?", (task, version)
+        ).fetchone()
+        require(intent, "no landing intent")
+        head = git(repo, "rev-parse", "refs/heads/main").decode().strip()
+        require(
+            git(repo, "symbolic-ref", "HEAD").decode().strip() == "refs/heads/main"
+            and not git(repo, "status", "--porcelain"),
+            "inspect and repair main checkout first",
+        )
+        require(
+            head in (intent["base"], intent["commit_id"]),
+            "main diverged; manual reconciliation required",
+        )
+        if head == intent["commit_id"]:
+            _finish(db, task, version, intent)
+            return {"status": "landed-locally", "candidate": intent["candidate"]}
+        db.execute("UPDATE jobs SET status='proposed' WHERE task=? AND version=?", (task, version))
+        db.execute("DELETE FROM landing_intents WHERE task=? AND version=?", (task, version))
+        return {"status": "proposal-retained", "candidate": intent["candidate"]}

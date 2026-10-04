@@ -26,13 +26,15 @@ File operations use Linux non-following dirfds, reject traversal, links and spec
 files, bound text size and check input digests. Edits stop when a task waits,
 is revoked or has submitted a proposal. No shell, agents, arbitrary MCP,
 messaging, Git or administration tool is exposed. The old shell-off farm CLI
-exception is removed. `FARM_REQUIRE_ISOLATION=1` disables legacy daemon dispatch,
+exception is removed. Isolation defaults on; only explicit `0`, `false`, `off` or
+`no` for `FARM_REQUIRE_ISOLATION` permits legacy execution. Isolation disables daemon dispatch,
 raw run-shim persistence and automatic Git landing in the dogfood image.
 `FARM_TIER0=1` denies farm CLI and trusted operator entrypoints before state opens.
 
 `authority.py` owns the durable SQLite task/escalation ledger outside worker mounts.
 Tokens are random, hashed at rest and scoped to one task/version. New versions
-revoke former capabilities; extra identity fields and unknown tools are denied.
+revoke former capabilities and close their open escalations as superseded with
+a system reviewer and timestamp; extra identity fields and unknown tools are denied.
 Results remain proposals. Persisted/exported metadata contains only closed identity
 fields, reason/authority enums and evidence digests. No provider credentials,
 request bodies, prompts, file contents, verification output, run environments or
@@ -50,8 +52,13 @@ notifications are sent. Isolation mode locks privacy, hatching/invites and the
 legacy planner even for managers.
 
 Trusted commands: `clodfarm.f1c register`, `serve`, `inbox`, `disposition`, `revoke`,
-`prepare`, `candidate`, `review`, `land`. `FARM_AUTHORITY_DB` names an absolute
-supervisor-owned database. Registration writes a protected token file without
+`prepare`, `candidate`, `review`, `land`, `reconcile`. `FARM_AUTHORITY_DB` names an absolute
+supervisor-owned database. Registration runs on the trusted host, checks
+`--policy-sha256` against immutable policy bytes, and rejects noncanonical or
+overlapping host roots. Broker mounts retain those same absolute paths. The broker
+uses UID 10002, distinct from worker UID 10001; host staging must give the broker
+group-read access to worker output and keep the supervisor directory mode 0700.
+Registration writes a protected token file without
 printing it. `prepare` imports explicitly selected proposal files and creates a
 commit on current main without executing worker code, Git hooks, pushes or rebases.
 Landing requires `FARM_PUSH=0`, nonempty `FARM_VERIFY_CMD`, a clean main checkout
@@ -59,9 +66,15 @@ and an accepted **parent Claude** verdict for the exact candidate. The trusted
 Claude workflow supplies a JSON artifact with exactly these fields:
 
 ```json
-{"task":"example","version":1,"candidate":"<SHA256>","reviewer":"parent-claude","accepted":true}
+{"task":"example","version":1,"candidate":"<SHA256>","reviewer":"parent-claude","reviewer_run":"parent-claude:<independently-checked-run>","accepted":true}
 ```
 
+Human-triggered import rejects evidence under every registered input/output root,
+links and unsafe ownership/modes; the reviewer run reference must differ from the
+worker identity. The trusted operator must check that reference against the real
+Claude run before import. JSON declarations alone are not authentication. CLI
+dispositions similarly require a named operator or checked Claude run via `--actor`.
+Host administration is the trust boundary; it is not a worker capability.
 Human-triggered import is implemented. Native unattended reviewer execution remains
 subject to F1a terms; F1d is required when Codex participates. Codex cannot replace
 Claude's verdict. Worker RPC cannot import verdicts. Mission approvals are ignored.
@@ -72,10 +85,16 @@ candidate and review. Verification reads committed blobs directly, including
 `export-ignore` files, rejects links/submodules, and runs in a networkless container
 with no Git/auth/state/socket mounts. Its writable build tree is bounded and
 output/logs are discarded. Timeout removes only its unique verifier container.
-Verification reruns at landing. A Git ref compare-and-swap rejects concurrent main
-changes. Landing is local only. Failure between Git ref update and ledger commit
-requires trusted reconciliation and cannot auto-retry or accept another result;
-this recovery scenario remains an F2 pilot control.
+Verification reruns outside the database write transaction; status RPC reads
+remain read-only. A short transaction rechecks task, candidate and review before
+recording a durable landing intent. A Git ref compare-and-swap rejects concurrent
+main changes. Proposal imports reject `.gitattributes`/`.gitmodules`, and configured
+host Git filters block landing. Landing is local only. A crash or failed reset
+leaves the intent, revokes the token and blocks further landing. `reconcile` checks
+the exact base/commit and a clean main checkout before recording completion or
+retaining the proposal. It never resets a dirty checkout: an operator must inspect
+and repair it separately. Unit tests inject reset failure and a post-reset crash;
+the approved-host F2 recovery control remains pending.
 
 ```sh
 python -m unittest discover -s tests -p 'test_f1c*.py'
@@ -95,3 +114,14 @@ controls. `public_web.read` currently returns exact preapproved, digest-checked
 public snapshots; it has no network or arbitrary URL/query forwarding.
 Re-run controls and whole-runtime F1a inventory checks for every accepted revision.
 AgentRunway records this candidate separately without replacing F1a runtime fields.
+
+The dogfood workflow checks out the PR head, uses that exact revision as
+`FARM_REVISION`, runs both a real failing verifier (`exit 3`) and a passing
+command requiring `/workspace/proposal.txt`, and retains the tested image plus
+revision/run metadata. AgentRunway pins that CI-produced image instead of
+claiming independent apt/pip builds reproduce the same digest. Dispatch the same
+workflow with `companion_sha` and `image_run_id` to reproduce the committed
+Compose and run its actual broker/worker through host-side prepare/candidate/land.
+This explicit synthetic run starts no scheduler, login, model call or notification.
+A successful cross-repository run is recorded against both exact heads and the
+image ID; it does not accept live terms/host gates.

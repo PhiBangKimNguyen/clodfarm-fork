@@ -2,17 +2,40 @@ name: Pinned dogfood runtime
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      companion_sha:
+        description: 'Optional exact AgentRunway head for rendered deployment validation'
+        default: ''
+      image_run_id:
+        description: 'Successful image-producing run for companion validation'
+        default: ''
 permissions:
   contents: read
+  actions: read
 jobs:
+  companion:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.companion_sha != '' }}
+    uses: ./.github/workflows/f1c-companion.yml
+    with:
+      agentrunway_sha: ${{ inputs.companion_sha }}
+      image_run_id: ${{ inputs.image_run_id }}
   offline-runtime:
+    if: ${{ inputs.companion_sha == '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Build credential-free Linux candidate
-        run: >-
-          docker build --platform linux/amd64 -f Dockerfile.dogfood
-          --build-arg FARM_REVISION="$GITHUB_SHA" -t clodfarm-dogfood:check .
+        run: |
+          revision=$(git rev-parse HEAD)
+          docker build --platform linux/amd64 -f Dockerfile.dogfood --build-arg FARM_REVISION="$revision" -t clodfarm-dogfood:check .
+          image=$(docker image inspect clodfarm-dogfood:check --format '{{.Id}}')
+          python3 - "$revision" "$image" <<'PY'
+          import json, sys
+          from pathlib import Path
+          Path('f1c-ci-image.json').write_text(json.dumps({'format':'clodfarm.ci-image/v1', 'revision':sys.argv[1], 'image':sys.argv[2], 'run_id':'${{ github.run_id }}', 'run_attempt':'${{ github.run_attempt }}'}, indent=2)+'\n')
+          PY
       - name: Verify pinned native versions and fork source without network
         run: |
           docker run --rm --network=none --read-only clodfarm-dogfood:check claude --version | grep -F '2.1.288'
@@ -27,3 +50,12 @@ jobs:
           pip install -e '.[test]'
           export F1C_SMOKE_IMAGE=$(docker image inspect clodfarm-dogfood:check --format '{{.Id}}')
           python -m unittest discover -s tests -p test_f1c.py
+      - name: Preserve tested head image for companion pinning
+        run: docker save clodfarm-dogfood:check | gzip > f1c-ci-image.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: f1c-ci-image-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            f1c-ci-image.json
+            f1c-ci-image.tar.gz
+          retention-days: 14

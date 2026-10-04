@@ -30,6 +30,8 @@ farm through your browser.
 
 from __future__ import annotations
 
+from .isolation import isolation_required
+
 import base64
 import hashlib
 import hmac
@@ -473,7 +475,7 @@ class FarmUI:
     def private(self, st: dict | None = None) -> bool:
         """Only signed-in people watch: the manager made it private, or its host did (FARM_UI_PRIVATE=1)."""
         st = st if st is not None else self.store.settings()
-        return bool(st.get("private")) or os.environ.get("FARM_UI_PRIVATE") == "1" or os.environ.get("FARM_REQUIRE_ISOLATION") == "1"
+        return bool(st.get("private")) or os.environ.get("FARM_UI_PRIVATE") == "1" or isolation_required()
 
     def managers(self, st: dict | None = None) -> list[str]:
         """The Claudes whose persons run the farm: the farm's own (first) Claude until a manager changes it."""
@@ -1118,7 +1120,7 @@ def make_handler(ui: FarmUI):
             return got[0] if got and ui.store.invite(got[0]) else None
 
         def _hatch_invited(self, data: dict):
-            if os.environ.get("FARM_REQUIRE_ISOLATION") == "1":
+            if isolation_required():
                 return self._err(403, "isolated farm hatching is closed")
             """POST /api/agents {invite: true}: the invited person's own Claude, waiting for their login."""
             th = self._invited()
@@ -1149,7 +1151,7 @@ def make_handler(ui: FarmUI):
             self.wfile.write(body)
 
         def _hatch_view(self, who: Who) -> dict:
-            if os.environ.get("FARM_REQUIRE_ISOLATION") == "1":
+            if isolation_required():
                 return {"can": False, "why": "isolated farm hatching is closed", "claudes": 0, "max": 0}
             st = ui.store.settings()
             n = len([a for a in ui.manager.all() if not a.get("primary")])
@@ -1397,7 +1399,7 @@ def make_handler(ui: FarmUI):
             """A new Claude (or bot). Anyone who may watch the farm hatches one, once: the browser that hatched it
             gets its owner cookie. The person chooses its skin, whether they approve every mission sent to it, and
             which tools it may use."""
-            if os.environ.get("FARM_REQUIRE_ISOLATION") == "1":
+            if isolation_required():
                 return self._err(403, "isolated farm hatching is closed")
             store, mgr = ui.store, ui.manager
             hv = self._hatch_view(who)
@@ -1441,7 +1443,7 @@ def make_handler(ui: FarmUI):
                 from .f1c import manager_authority
                 manager_authority().disposition(data.get("id"), "human-manager:" + (self._who().owner or ui.cfg.name), data.get("action"))
                 return self._json(self._manager_view())
-            if os.environ.get("FARM_REQUIRE_ISOLATION") == "1" and (
+            if isolation_required() and (
                 path == "/api/manager/invite" or data.get("private") is False or data.get("hatch_open") is True
                 or (path == "/api/manager/planner" and data.get("on"))
             ):
@@ -1577,7 +1579,7 @@ def make_handler(ui: FarmUI):
                 ui.manager.share_connectors()
                 acct = (v.get("account") or {}).get("name")
                 store.event("connector.stripe", f"Stripe connected ({v['mode']} mode" + (f", {acct}" if acct else "")
-                            + f", key …{v['last4']}): every Claude gets mcp__stripe__*", by="ui")
+                            + f", key â€¦{v['last4']}): every Claude gets mcp__stripe__*", by="ui")
                 return self._json(ui.connectors_view(who))
             if path == "/api/connectors/stripe/disconnect":
                 if not who.manager:
@@ -1592,7 +1594,7 @@ def make_handler(ui: FarmUI):
                 creds = {k: str(data.get(k) or "")[:600] for k in (*connectors.GADS_FIELDS, *connectors.GADS_OPTIONAL)}
                 v = connectors.gads_connect(ui.cfg.workspace, creds, by=f"owner:{who.owner}" if who.owner else "manager")
                 ui.manager.share_connectors()
-                tok = f", developer token …{v['developer_token_last4']}" if v.get("developer_token_last4") else ""
+                tok = f", developer token â€¦{v['developer_token_last4']}" if v.get("developer_token_last4") else ""
                 store.event("connector.google_ads", f"Google Ads connected ({len(v['customers'])} account(s){tok}): "
                             "every Claude can use `clodfarm gads`", by="ui")
                 return self._json(ui.connectors_view(who))

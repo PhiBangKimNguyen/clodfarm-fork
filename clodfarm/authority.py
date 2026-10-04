@@ -68,7 +68,12 @@ class Authority:
                 CREATE TABLE IF NOT EXISTS landings (
                     task TEXT, version INTEGER, candidate TEXT, landed REAL,
                     PRIMARY KEY(task, version));
+                CREATE TABLE IF NOT EXISTS landing_intents (
+                    task TEXT, version INTEGER, candidate TEXT, base TEXT, commit_id TEXT,
+                    created REAL, PRIMARY KEY(task, version));
             """)
+            if "reviewer_run" not in {row[1] for row in db.execute("PRAGMA table_info(reviews)")}:
+                db.execute("ALTER TABLE reviews ADD COLUMN reviewer_run TEXT")
         os.chmod(path, 0o600)
 
     @contextlib.contextmanager
@@ -89,6 +94,10 @@ class Authority:
         )
         require(input_root.resolve() != output_root.resolve(), "shared input/output denied")
         require(input_root.is_dir() and output_root.is_dir(), "workspace missing")
+        require(
+            all(root.absolute() == root.resolve(strict=True) for root in (input_root, output_root)),
+            "noncanonical host workspace denied",
+        )
         roots = (input_root.resolve(), output_root.resolve())
         require(
             not any(self.path.resolve().is_relative_to(r) for r in roots),
@@ -107,6 +116,21 @@ class Authority:
                 isinstance(digest, str) and HASH.fullmatch(digest),
                 "public snapshot digest required",
             )
+        if policy["data_class"] == "public_safe":
+            require(
+                bool(reads)
+                and policy["input_files"] == {"public-" + d + ".txt": d for d in reads.values()},
+                "public-safe inputs require approved public snapshots",
+            )
+        workspace = Workspace(*roots)
+        try:
+            for name, digest in policy["input_files"].items():
+                require(
+                    hashlib.sha256(workspace.read("input", name)).hexdigest() == digest,
+                    "approved input digest mismatch",
+                )
+        finally:
+            workspace.close()
         token = secrets.token_hex(32)
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -114,6 +138,12 @@ class Authority:
                 "SELECT MAX(version) FROM jobs WHERE task=?", (policy["task"],)
             ).fetchone()[0]
             require(previous is None or policy["version"] > previous, "task version must advance")
+            require(
+                not db.execute(
+                    "SELECT 1 FROM landing_intents WHERE task=?", (policy["task"],)
+                ).fetchone(),
+                "landing reconciliation required",
+            )
             for other in db.execute(
                 "SELECT * FROM jobs WHERE task!=? AND status!='revoked'", (policy["task"],)
             ):
@@ -125,6 +155,12 @@ class Authority:
                         )
             # Versions invalidate all former tokens and review verdicts. No rerouting.
             db.execute("UPDATE jobs SET status='revoked' WHERE task=?", (policy["task"],))
+            db.execute(
+                "UPDATE escalations SET status='superseded',reviewer='system:version-advance',"
+                "decided=?,disposition='superseded' WHERE task=? "
+                "AND status IN ('pending','acknowledged')",
+                (time.time(), policy["task"]),
+            )
             db.execute(
                 "INSERT INTO jobs VALUES (?,?,?,?,?,?,?,'assigned',NULL)",
                 (
@@ -141,6 +177,13 @@ class Authority:
 
     def revoke(self, task, version):
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            require(
+                not db.execute(
+                    "SELECT 1 FROM landing_intents WHERE task=? AND version=?", (task, version)
+                ).fetchone(),
+                "landing reconciliation required",
+            )
             db.execute(
                 "UPDATE jobs SET status='revoked' WHERE task=? AND version=?", (task, version)
             )
@@ -165,7 +208,8 @@ class Authority:
         tool, args = request["tool"], request["input"]
         require(isinstance(tool, str) and isinstance(args, dict), "invalid RPC")
         with self.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
+            if tool != "task.status":
+                db.execute("BEGIN IMMEDIATE")
             job = db.execute(
                 "SELECT * FROM jobs WHERE token_hash=?",
                 (hashlib.sha256(token.encode()).hexdigest(),),
@@ -256,7 +300,10 @@ class Authority:
         human = isinstance(reviewer, str) and re.fullmatch(
             r"human-manager:[a-z0-9][a-z0-9._-]{0,63}", reviewer
         )
-        require(reviewer == "parent-claude" or human, "identified reviewer required")
+        claude = isinstance(reviewer, str) and re.fullmatch(
+            r"parent-claude:[a-z0-9][a-z0-9._-]{0,127}", reviewer
+        )
+        require(reviewer == "parent-claude" or claude or human, "identified reviewer required")
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT * FROM escalations WHERE id=?", (eid,)).fetchone()
@@ -269,6 +316,10 @@ class Authority:
                 "SELECT * FROM jobs WHERE task=? AND version=?", (row["task"], row["version"])
             ).fetchone()
             require(job and job["status"] == "waiting", "stale task disposition")
+            require(
+                not claude or reviewer.split(":", 1)[1] != json.loads(job["policy"])["worker"],
+                "self disposition denied",
+            )
             status = {
                 "acknowledge": "acknowledged",
                 "reject": "rejected",
@@ -284,9 +335,33 @@ class Authority:
                     ("assigned" if action == "retry" else "revoked", row["task"], row["version"]),
                 )
 
-    def record_review(self, task, version, candidate, reviewer, accepted, evidence):
+    def trusted_evidence(self, path):
+        path = Path(path)
+        require(path.absolute() == path.resolve(strict=True), "linked review evidence denied")
+        meta = path.stat()
+        require(
+            stat.S_ISREG(meta.st_mode)
+            and meta.st_nlink == 1
+            and meta.st_uid == os.geteuid()
+            and not meta.st_mode & 0o022,
+            "trusted review evidence ownership required",
+        )
+        with self.connect() as db:
+            for job in db.execute("SELECT input_root,output_root FROM jobs"):
+                require(
+                    not any(path.is_relative_to(Path(root)) for root in job),
+                    "worker-root review evidence denied",
+                )
+        return path
+
+    def record_review(self, task, version, candidate, reviewer, accepted, evidence, reviewer_run):
         require(reviewer == "parent-claude", "Claude review required")
         require(isinstance(candidate, str) and HASH.fullmatch(candidate), "candidate required")
+        require(
+            isinstance(reviewer_run, str)
+            and re.fullmatch(r"parent-claude:[a-z0-9][a-z0-9._-]{0,127}", reviewer_run),
+            "trusted Claude run reference required",
+        )
         require(
             type(accepted) is bool and isinstance(evidence, str) and HASH.fullmatch(evidence),
             "review evidence required",
@@ -296,10 +371,20 @@ class Authority:
                 "SELECT * FROM jobs WHERE task=? AND version=?", (task, version)
             ).fetchone()
             require(job and job["status"] == "proposed", "task not proposed")
-            require(json.loads(job["policy"])["worker"] != reviewer, "self approval denied")
+            worker = json.loads(job["policy"])["worker"]
+            require(reviewer_run.split(":", 1)[1] != worker, "self approval denied")
             db.execute(
-                "INSERT OR REPLACE INTO reviews VALUES (?,?,?,?,?,?,?)",
-                (task, version, candidate, reviewer, int(accepted), evidence, time.time()),
+                "INSERT OR REPLACE INTO reviews VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    task,
+                    version,
+                    candidate,
+                    reviewer,
+                    int(accepted),
+                    evidence,
+                    time.time(),
+                    reviewer_run,
+                ),
             )
 
 

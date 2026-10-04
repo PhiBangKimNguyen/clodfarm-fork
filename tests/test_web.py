@@ -363,6 +363,7 @@ def test_f1c_manager_inbox_is_private_and_dispositions_are_identified(ui, monkey
     input_root, output_root = tmp_path / "input", tmp_path / "output"
     input_root.mkdir()
     output_root.mkdir()
+    (input_root / "hello.txt").write_bytes(b"synthetic input")
     token = authority.register(policy(), input_root, output_root)
     workspace = Workspace(input_root, output_root)
     try:

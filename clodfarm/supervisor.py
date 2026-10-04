@@ -16,6 +16,8 @@ Threads:
 
 from __future__ import annotations
 
+from .isolation import isolation_required
+
 import json
 import os
 import re
@@ -88,7 +90,7 @@ class Farm:
 
     # ------------------------------------------------------------ lifecycle
     def run(self):
-        if os.environ.get("FARM_REQUIRE_ISOLATION") == "1":
+        if isolation_required():
             raise ValueError("Legacy shared runner disabled: use isolated Tier 0 jobs and trusted F1c services")
         if threading.current_thread() is threading.main_thread():
             signal.signal(signal.SIGTERM, lambda *_: self.stop.set())
@@ -481,7 +483,7 @@ class Farm:
             return
         after = self.claude_version()
         if after and after != before:
-            self.store.event("claude.updated", f"Claude Code {before or '?'} → {after}")
+            self.store.event("claude.updated", f"Claude Code {before or '?'} â†’ {after}")
 
     def update_loop(self):
         while not self.stop.wait(self.cfg.claude_update):
@@ -729,7 +731,7 @@ class Farm:
                # a message it sends counts one more message-triggered run (the wake loop guard)
                "FARM_MAIL_HOPS": str(max([int(m.get("hops") or 0) + 1 for m in mail], default=0))}
         # its session name carries its id, so other Claudes find it in ListAgents and message it with SendMessage
-        name = f"[clodfarm] {task.get('owner') or cfg.name} · {task['title'][:50]} · {tid}"
+        name = f"[clodfarm] {task.get('owner') or cfg.name} Â· {task['title'][:50]} Â· {tid}"
         sysprompt = prompts.task_system_prompt(cfg, task, cwd, branch, name)
         before = store.get_snapshot(self.seat)
         return {"cwd": cwd, "branch": branch, "parent_branch": parent_branch, "name": name, "sysprompt": sysprompt,
@@ -914,7 +916,7 @@ class Farm:
         """Put a successful run's commits where they belong. Returns (a line for the task result, outcome):
         outcome is kept (stays on its branch), landed (on main), conflict, verify_failed or stopped (cancelled
         meanwhile: not merged)."""
-        if os.environ.get("FARM_REQUIRE_ISOLATION") == "1":
+        if isolation_required():
             return "Proposal retained; exact-candidate F1c verification and Claude review required", "review_required"
         cfg, store, tid = self.cfg, self.store, task["id"]
         cur = store.get_task(tid) or {}
