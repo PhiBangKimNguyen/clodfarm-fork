@@ -380,6 +380,11 @@ class LandingTests(JobFixture):
         super().setUp()
         from clodfarm.landing import git, prepare
 
+        git_environment = patch.dict(
+            os.environ, {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"}
+        )
+        git_environment.start()
+        self.addCleanup(git_environment.stop)
         self.repo = self.root / "repo"
         self.repo.mkdir()
         git(self.repo, "init", "-b", "main")

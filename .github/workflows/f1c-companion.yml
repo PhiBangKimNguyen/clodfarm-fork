@@ -69,6 +69,9 @@ jobs:
       - name: Reproduce committed Compose and execute it through host landing
         env:
           IMAGE: ${{ steps.lock.outputs.image }}
+          # Synthetic temporary Git repository; do not inherit runner LFS filters.
+          GIT_CONFIG_NOSYSTEM: '1'
+          GIT_CONFIG_GLOBAL: /dev/null
         run: |
           python3 -m venv /tmp/f1c-companion-python
           /tmp/f1c-companion-python/bin/pip install -e './runtime[test]'
@@ -78,7 +81,7 @@ jobs:
           cmp /tmp/f1c-compose.json tools/dogfood/farm/f1c-compose.json
           docker compose -f /tmp/f1c-compose.json config --quiet
           /tmp/f1c-companion-python/bin/python -m unittest discover -s tests/dogfood
-          sudo env PYTHONPATH="$PWD:$PWD/../runtime" /tmp/f1c-companion-python/bin/python -m tools.dogfood.farm.f1c_compose_smoke --image "$IMAGE" | tee /tmp/f1c-compose-smoke.json
+          sudo env GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null PYTHONPATH="$PWD:$PWD/../runtime" /tmp/f1c-companion-python/bin/python -m tools.dogfood.farm.f1c_compose_smoke --image "$IMAGE" | tee /tmp/f1c-compose-smoke.json
       - uses: actions/upload-artifact@v4
         with:
           name: f1c-companion-${{ inputs.agentrunway_sha }}
