@@ -18,3 +18,9 @@ jobs:
           docker run --rm --network=none --read-only clodfarm-dogfood:check claude --version | grep -F '2.1.288'
           docker run --rm --network=none --read-only clodfarm-dogfood:check codex --version | grep -F '0.160.0'
           docker run --rm --network=none --read-only clodfarm-dogfood:check python -c 'import os; from clodfarm.upgrade import REPO; assert REPO == "https://github.com/PhiBangKimNguyen/clodfarm-fork"; assert os.environ["FARM_CLAUDE_UPDATE"] == "0"'
+      - name: Reject writable-workspace release overrides and upgrades offline
+        run: >-
+          docker run --rm --network=none --read-only
+          --tmpfs /tmp:rw,nosuid,size=32m,uid=10001,gid=10001
+          --mount type=bind,source="$PWD/tests/dogfood_image_check.py",target=/check.py,readonly
+          clodfarm-dogfood:check python /check.py
