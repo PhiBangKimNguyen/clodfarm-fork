@@ -26,6 +26,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Build credential-free Linux candidate
         run: |
           revision=$(git rev-parse HEAD)
@@ -44,12 +47,21 @@ jobs:
       - name: F1c actual container and restart controls
         run: |
           image=$(docker image inspect clodfarm-dogfood:check --format '{{.Id}}')
-          python3 scripts/f1c_desktop_smoke.py --image "$image"
+          python3 scripts/f1c_image_source.py --image "$image" > f1c-image-source.json
+          python3 scripts/f1c_desktop_smoke.py --image "$image" | tee f1c-smoke.json
       - name: F1c exact-candidate landing with real isolated verifier
         run: |
           pip install -e '.[test]'
           export F1C_SMOKE_IMAGE=$(docker image inspect clodfarm-dogfood:check --format '{{.Id}}')
           python -m unittest discover -s tests -p test_f1c.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: f1c-ci-metadata-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            f1c-ci-image.json
+            f1c-image-source.json
+            f1c-smoke.json
+          retention-days: 90
       - name: Preserve tested head image for companion pinning
         run: docker save clodfarm-dogfood:check | gzip > f1c-ci-image.tar.gz
       - uses: actions/upload-artifact@v4
@@ -58,4 +70,10 @@ jobs:
           path: |
             f1c-ci-image.json
             f1c-ci-image.tar.gz
-          retention-days: 14
+          retention-days: 90
+      - name: Reject writable-workspace release overrides and upgrades offline
+        run: >-
+          docker run --rm --network=none --read-only
+          --tmpfs /tmp:rw,nosuid,size=32m,uid=10001,gid=10001
+          --mount type=bind,source="$PWD/tests/dogfood_image_check.py",target=/check.py,readonly
+          clodfarm-dogfood:check python /check.py
