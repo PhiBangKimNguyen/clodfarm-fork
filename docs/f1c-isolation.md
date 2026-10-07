@@ -47,7 +47,8 @@ policy, terms and external-action decisions go to the human inbox.
 UI shows destinations, task/version, evidence, age and dispositions. Acknowledgement
 does not resume work. Human dispositions name the operator; parent Claude cannot
 decide human authority requests. Workers cannot approve or retry. SQLite records
-and stale-socket recovery preserve the queue across broker restart. No external
+and stale-socket recovery preserve the queue across broker restart. Version
+advancement or revocation closes open items as superseded with a system decision. No external
 notifications are sent. Isolation mode locks privacy, hatching/invites and the
 legacy planner even for managers.
 
@@ -56,8 +57,9 @@ Trusted commands: `clodfarm.f1c register`, `serve`, `inbox`, `disposition`, `rev
 supervisor-owned database. Registration runs on the trusted host, checks
 `--policy-sha256` against immutable policy bytes, and rejects noncanonical or
 overlapping host roots. Broker mounts retain those same absolute paths. The broker
-uses UID 10002, distinct from worker UID 10001; host staging must give the broker
-group-read access to worker output and keep the supervisor directory mode 0700.
+uses UID 10002 and socket/output group 10001, distinct from worker UID 10001.
+The socket is mode 0660 and output files mode 0640 in group 10001. Host staging
+keeps the supervisor directory mode 0700 owned by UID 10002, never worker-readable.
 Registration writes a protected token file without
 printing it. `prepare` imports explicitly selected proposal files and creates a
 commit on current main without executing worker code, Git hooks, pushes or rebases.
@@ -91,8 +93,9 @@ recording a durable landing intent. A Git ref compare-and-swap rejects concurren
 main changes. Proposal imports reject `.gitattributes`/`.gitmodules`, and configured
 host Git filters block landing. Landing is local only. A crash or failed reset
 leaves the intent, revokes the token and blocks further landing. `reconcile` checks
-the exact base/commit and a clean main checkout before recording completion or
-retaining the proposal. It never resets a dirty checkout: an operator must inspect
+a clean main checkout and whether the reviewed commit is an ancestor of main.
+It records completion when main contains it; otherwise it retains the proposal,
+clears the stale review and requires preparing/reviewing again. It never resets a dirty checkout: an operator must inspect
 and repair it separately. Unit tests inject reset failure and a post-reset crash;
 the approved-host F2 recovery control remains pending.
 

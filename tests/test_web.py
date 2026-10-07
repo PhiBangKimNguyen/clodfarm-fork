@@ -392,6 +392,8 @@ def test_f1c_manager_cannot_open_privacy_hatching_invites_or_legacy_planner(ui, 
     manager = client()
     login(manager, base)
     for path, body in (("settings", {"private": False}), ("settings", {"hatch_open": True}),
+                       ("settings", {"private": 0}), ("settings", {"hatch_open": 1}),
+                       ("settings", {"private": "false"}), ("settings", {"hatch_open": "true"}),
                        ("invite", {}), ("planner", {"on": True, "goal": "synthetic"})):
         assert manager(base + "/api/manager/" + path, body)[0] == 403
     assert manager(base + "/api/agents", {"name": "blocked"})[0] == 403

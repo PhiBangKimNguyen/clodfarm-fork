@@ -152,6 +152,7 @@ def command(argv: list[str]) -> list[str]:
 
 def main():
     from .isolation import tier0
+
     if tier0():
         print("Tier 0 has no farm CLI capability; use the scoped task RPC.", file=sys.stderr)
         sys.exit(1)

@@ -1,7 +1,8 @@
 """Portable Docker CLI smoke. No test container receives the Docker socket.
 
 All state lives in one uniquely named disposable volume. Only a trusted synthetic
-bootstrap runs as root to set ownership. Broker and worker run as UID 10001.
+bootstrap runs as root to set ownership. Broker uses UID 10002 and worker uses
+UID 10001; both use socket group 10001.
 """
 
 import argparse
@@ -86,8 +87,9 @@ from clodfarm.authority import Authority
 root = Path('/scratch')
 for name in ['input', 'output', 'policy', 'capability', 'rpc', 'supervisor', 'other-worker']:
     path = root / name
-    path.mkdir(mode=0o700)
-    os.chown(path, 10001, 10001)
+    path.mkdir(mode=0o700 if name in ('supervisor', 'other-worker') else 0o750)
+    owner = 10001 if name == 'output' else 10002
+    os.chown(path, owner, 10002 if name == 'supervisor' else 10001)
 policy = json.loads(POLICY)
 (root/'input/hello.txt').write_text('synthetic input')
 (root/'input/hello.txt').chmod(0o444)
@@ -99,7 +101,7 @@ token = authority.register(policy, root/'input', root/'output')
 (root/'capability/token').write_text(token)
 (root/'capability/token').chmod(0o400)
 os.chown(root/'capability/token', 10001, 10001)
-os.chown(root/'supervisor/authority.db', 10001, 10001)
+os.chown(root/'supervisor/authority.db', 10002, 10002)
 """.replace("POLICY", repr(raw))
         docker(
             "run",
@@ -120,7 +122,7 @@ os.chown(root/'supervisor/authority.db', 10001, 10001)
             "--name",
             broker,
             *boundary,
-            "--user=10001:10001",
+            "--user=10002:10001",
             "--mount",
             f"type=volume,src={tag},dst=/scratch",
             "--env",
@@ -264,6 +266,21 @@ except OSError as e:
 """
         docker("run", "--rm", *worker_args, args.image, "python", "-I", "-c", probe)
         checks.append("kernel-readonly-mounts-private-state-auth-and-egress")
+        docker(
+            "run",
+            "--rm",
+            *worker_args,
+            "--mount",
+            f"type=volume,src={tag},dst=/supervisor,volume-subpath=supervisor,readonly",
+            args.image,
+            "python",
+            "-I",
+            "-c",
+            "import errno; from pathlib import Path\n"
+            "try: Path('/supervisor/authority.db').read_bytes(); raise AssertionError('DB')\n"
+            "except OSError as e: assert e.errno == errno.EACCES",
+        )
+        checks.append("distinct-supervisor-uid-denies-accidental-private-mount")
         result = docker(
             "run", "--rm", *worker_args, args.image, "clodfarm", "farm", "public", check=False
         )

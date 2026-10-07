@@ -187,6 +187,12 @@ class Authority:
             db.execute(
                 "UPDATE jobs SET status='revoked' WHERE task=? AND version=?", (task, version)
             )
+            db.execute(
+                "UPDATE escalations SET status='superseded',reviewer='system:revoke',"
+                "decided=?,disposition='revoked' WHERE task=? AND version=? "
+                "AND status IN ('pending','acknowledged')",
+                (time.time(), task, version),
+            )
 
     def _evidence(self, job, args):
         shape(args, {"path", "sha256"})
@@ -303,7 +309,7 @@ class Authority:
         claude = isinstance(reviewer, str) and re.fullmatch(
             r"parent-claude:[a-z0-9][a-z0-9._-]{0,127}", reviewer
         )
-        require(reviewer == "parent-claude" or claude or human, "identified reviewer required")
+        require(claude or human, "identified reviewer required")
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT * FROM escalations WHERE id=?", (eid,)).fetchone()

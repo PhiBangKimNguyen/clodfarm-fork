@@ -58,6 +58,23 @@ class JobFixture(unittest.TestCase):
 
 
 class IsolationTests(JobFixture):
+    def test_revoke_closes_escalation_and_requires_named_reviewer(self):
+        item = self.call(
+            "task.escalate",
+            {
+                "reason": "needs-clarification",
+                "authority": "parent-claude",
+                "evidence": self.proposal(),
+            },
+        )
+        with self.assertRaisesRegex(Denied, "identified reviewer required"):
+            self.authority.disposition(item["id"], "parent-claude", "retry")
+        self.authority.revoke("job-one", 1)
+        closed = self.authority.inbox()[0]
+        self.assertEqual(closed["status"], "superseded")
+        self.assertEqual(closed["reviewer"], "system:revoke")
+        self.assertIsNotNone(closed["decided"])
+
     def test_stale_socket_is_recovered_and_non_socket_path_denied(self):
         path = self.root / "stale.sock"
         stale = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -193,7 +210,7 @@ class IsolationTests(JobFixture):
         self.assertEqual(restarted.inbox()[0]["destination"], "human")
         self.assertGreaterEqual(restarted.inbox()[0]["age_seconds"], 0)
         with self.assertRaises(Denied):
-            restarted.disposition(item["id"], "parent-claude", "retry")
+            restarted.disposition(item["id"], "parent-claude:review-test", "retry")
         restarted.disposition(item["id"], "human-manager:operator", "acknowledge")
         self.assertEqual(self.call("task.status", {})["status"], "waiting")
         with self.assertRaises(Denied):
@@ -204,7 +221,7 @@ class IsolationTests(JobFixture):
             "task.escalate",
             {"reason": "needs-clarification", "evidence": evidence, "authority": "parent-claude"},
         )
-        restarted.disposition(second["id"], "parent-claude", "reject")
+        restarted.disposition(second["id"], "parent-claude:review-test", "reject")
         self.assertEqual(restarted.inbox()[1]["status"], "rejected")
         with self.assertRaises(Denied):
             self.call("task.status", {})
@@ -228,7 +245,7 @@ class IsolationTests(JobFixture):
         with self.assertRaises(Denied):
             self.call("task.status", {})
         with self.assertRaises(Denied):
-            self.authority.disposition(item["id"], "parent-claude", "retry")
+            self.authority.disposition(item["id"], "parent-claude:review-test", "retry")
         with self.assertRaises(Denied):
             self.authority.register(policy(version=1), self.input, self.output)
         with self.assertRaises(Denied):
@@ -576,6 +593,127 @@ class LandingTests(JobFixture):
             land(self.authority, self.repo, "job-one", 1, "true", self.verifier())
         self.assertEqual(git(self.repo, "rev-parse", "HEAD"), self.base)
 
+    def test_ignored_operator_file_and_directory_are_preserved(self):
+        from clodfarm.landing import git, land, prepare
+
+        (self.repo / ".git/info/exclude").write_text("proposal.txt\nlocal/\n")
+        for path in ("proposal.txt", "local/notes.txt"):
+            with self.subTest(path=path):
+                target = self.repo / path
+                target.parent.mkdir(exist_ok=True)
+                target.write_text("operator sentinel")
+                (self.output / path).parent.mkdir(exist_ok=True)
+                self.workspace.write(path, "worker proposal")
+                prepare(self.authority, self.repo, "job-one", 1, [path])
+                self.record()
+                with self.assertRaisesRegex(Denied, "untracked or ignored operator path exists"):
+                    land(self.authority, self.repo, "job-one", 1, "true", self.verifier())
+                self.assertEqual(target.read_text(), "operator sentinel")
+                self.assertEqual(git(self.repo, "rev-parse", "HEAD"), self.base)
+                target.unlink()
+
+    def test_ignored_operator_symlink_is_preserved(self):
+        from clodfarm.landing import land
+
+        (self.repo / ".git/info/exclude").write_text("proposal.txt\n")
+        sentinel = self.root / "operator.txt"
+        sentinel.write_text("operator sentinel")
+        (self.repo / "proposal.txt").symlink_to(sentinel)
+        self.record()
+        with self.assertRaisesRegex(Denied, "linked operator path denied"):
+            land(self.authority, self.repo, "job-one", 1, "true", self.verifier())
+        self.assertEqual(sentinel.read_text(), "operator sentinel")
+
+    def test_cli_review_import_and_stale_or_wrong_reviewer(self):
+        from clodfarm.f1c import main
+
+        record = self.record()
+        path = self.root / "verdict.json"
+        verdict = {
+            "task": "job-one",
+            "version": 1,
+            "candidate": record["identity"],
+            "reviewer": "parent-claude",
+            "reviewer_run": "parent-claude:independent-run",
+            "accepted": True,
+        }
+        args = [
+            "review",
+            "--task",
+            "job-one",
+            "--version",
+            "1",
+            "--repo",
+            str(self.repo),
+            "--verifier-image",
+            IMAGE,
+            "--claude-evidence",
+            str(path),
+        ]
+        with patch.dict(
+            os.environ, {"FARM_AUTHORITY_DB": str(self.authority.path), "FARM_VERIFY_CMD": "true"}
+        ):
+            for changes, reason in (
+                ({"candidate": "0" * 64}, "stale review artifact"),
+                ({"reviewer": "worker-one"}, "Claude review required"),
+            ):
+                path.write_text(json.dumps(verdict | changes))
+                path.chmod(0o600)
+                with self.assertRaisesRegex(Denied, reason):
+                    main(args)
+            path.write_text(json.dumps(verdict))
+            self.assertEqual(main(args), 0)
+        with self.authority.connect() as db:
+            self.assertEqual(
+                db.execute("SELECT reviewer_run FROM reviews").fetchone()[0],
+                "parent-claude:independent-run",
+            )
+
+    def test_compare_and_swap_failure_retains_proposal_and_invalidates_review(self):
+        from clodfarm import landing
+
+        self.record()
+        real_git = landing.git
+
+        def concurrent_main(repo, *args, **kwargs):
+            if args[:2] == ("update-ref", "refs/heads/main"):
+                (repo / "operator.txt").write_text("concurrent main")
+                real_git(repo, "add", "operator.txt")
+                real_git(repo, "commit", "-m", "concurrent operator change")
+            return real_git(repo, *args, **kwargs)
+
+        with patch("clodfarm.landing.git", side_effect=concurrent_main), self.assertRaises(Denied):
+            landing.land(self.authority, self.repo, "job-one", 1, "true", self.verifier())
+        head = real_git(self.repo, "rev-parse", "HEAD")
+        self.assertEqual(
+            landing.reconcile(self.authority, self.repo, "job-one", 1)["status"],
+            "proposal-retained",
+        )
+        self.assertEqual(real_git(self.repo, "rev-parse", "HEAD"), head)
+        self.assertEqual((self.repo / "operator.txt").read_text(), "concurrent main")
+        with self.authority.connect() as db:
+            self.assertFalse(db.execute("SELECT * FROM landing_intents").fetchone())
+            self.assertFalse(db.execute("SELECT * FROM reviews").fetchone())
+            self.assertEqual(db.execute("SELECT status FROM jobs").fetchone()[0], "proposed")
+
+    def test_reconcile_completed_landing_with_descendant_main(self):
+        from clodfarm import landing
+
+        self.record()
+        with (
+            patch("clodfarm.landing._finish", side_effect=RuntimeError("crash")),
+            self.assertRaises(RuntimeError),
+        ):
+            landing.land(self.authority, self.repo, "job-one", 1, "true", self.verifier())
+        (self.repo / "operator.txt").write_text("later main")
+        landing.git(self.repo, "add", "operator.txt")
+        landing.git(self.repo, "commit", "-m", "later operator commit")
+        head = landing.git(self.repo, "rev-parse", "HEAD")
+        self.assertEqual(
+            landing.reconcile(self.authority, self.repo, "job-one", 1)["status"], "landed-locally"
+        )
+        self.assertEqual(landing.git(self.repo, "rev-parse", "HEAD"), head)
+
     def test_slow_verification_does_not_block_other_task_escalation_or_disposition(self):
         import concurrent.futures
 
@@ -621,7 +759,7 @@ class LandingTests(JobFixture):
                     },
                 ).result(2)
                 pool.submit(
-                    self.authority.disposition, item["id"], "parent-claude", "retry"
+                    self.authority.disposition, item["id"], "parent-claude:review-test", "retry"
                 ).result(2)
                 self.assertEqual(self.authority.inbox()[0]["status"], "authorized-retry")
             finally:

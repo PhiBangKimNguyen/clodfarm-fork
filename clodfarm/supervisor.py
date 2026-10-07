@@ -16,8 +16,6 @@ Threads:
 
 from __future__ import annotations
 
-from .isolation import isolation_required
-
 import json
 import os
 import re
@@ -28,6 +26,8 @@ import subprocess
 import sys
 import threading
 import time
+
+from .isolation import isolation_required
 
 from . import awsapps, boot, dashboards, gitops, notify, planner, procs, prompts
 from .auth import (accept_remote_control, auth_status, banner, claude_name, install_browser_mcp, install_commands,
@@ -483,7 +483,7 @@ class Farm:
             return
         after = self.claude_version()
         if after and after != before:
-            self.store.event("claude.updated", f"Claude Code {before or '?'} â†’ {after}")
+            self.store.event("claude.updated", f"Claude Code {before or '?'} → {after}")
 
     def update_loop(self):
         while not self.stop.wait(self.cfg.claude_update):
@@ -731,7 +731,7 @@ class Farm:
                # a message it sends counts one more message-triggered run (the wake loop guard)
                "FARM_MAIL_HOPS": str(max([int(m.get("hops") or 0) + 1 for m in mail], default=0))}
         # its session name carries its id, so other Claudes find it in ListAgents and message it with SendMessage
-        name = f"[clodfarm] {task.get('owner') or cfg.name} Â· {task['title'][:50]} Â· {tid}"
+        name = f"[clodfarm] {task.get('owner') or cfg.name} · {task['title'][:50]} · {tid}"
         sysprompt = prompts.task_system_prompt(cfg, task, cwd, branch, name)
         before = store.get_snapshot(self.seat)
         return {"cwd": cwd, "branch": branch, "parent_branch": parent_branch, "name": name, "sysprompt": sysprompt,

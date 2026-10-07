@@ -12,13 +12,13 @@ already contains are deleted when a top-level task lands.
 
 from __future__ import annotations
 
-from .isolation import isolation_required, tier0
-
 import contextlib
 import fcntl
 import os
 import subprocess
 import threading
+
+from .isolation import isolation_required, tier0
 
 _tlock = threading.Lock()
 

@@ -30,8 +30,6 @@ farm through your browser.
 
 from __future__ import annotations
 
-from .isolation import isolation_required
-
 import base64
 import hashlib
 import hmac
@@ -47,6 +45,8 @@ from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
+
+from .isolation import isolation_required
 
 from . import __version__, boot, bots, browser, connectors, dashboards, policy, sso
 from . import mcp
@@ -1445,6 +1445,7 @@ def make_handler(ui: FarmUI):
                 return self._json(self._manager_view())
             if isolation_required() and (
                 path == "/api/manager/invite" or data.get("private") is False or data.get("hatch_open") is True
+                or any(k in data and type(data[k]) is not bool for k in ("private", "hatch_open"))
                 or (path == "/api/manager/planner" and data.get("on"))
             ):
                 return self._err(403, "isolated farm privacy, hatching and dispatch gates are locked")
@@ -1579,7 +1580,7 @@ def make_handler(ui: FarmUI):
                 ui.manager.share_connectors()
                 acct = (v.get("account") or {}).get("name")
                 store.event("connector.stripe", f"Stripe connected ({v['mode']} mode" + (f", {acct}" if acct else "")
-                            + f", key â€¦{v['last4']}): every Claude gets mcp__stripe__*", by="ui")
+                            + f", key …{v['last4']}): every Claude gets mcp__stripe__*", by="ui")
                 return self._json(ui.connectors_view(who))
             if path == "/api/connectors/stripe/disconnect":
                 if not who.manager:
@@ -1594,7 +1595,7 @@ def make_handler(ui: FarmUI):
                 creds = {k: str(data.get(k) or "")[:600] for k in (*connectors.GADS_FIELDS, *connectors.GADS_OPTIONAL)}
                 v = connectors.gads_connect(ui.cfg.workspace, creds, by=f"owner:{who.owner}" if who.owner else "manager")
                 ui.manager.share_connectors()
-                tok = f", developer token â€¦{v['developer_token_last4']}" if v.get("developer_token_last4") else ""
+                tok = f", developer token …{v['developer_token_last4']}" if v.get("developer_token_last4") else ""
                 store.event("connector.google_ads", f"Google Ads connected ({len(v['customers'])} account(s){tok}): "
                             "every Claude can use `clodfarm gads`", by="ui")
                 return self._json(ui.connectors_view(who))

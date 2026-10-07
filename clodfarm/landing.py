@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import tempfile
 import time
@@ -230,6 +231,7 @@ def _landing_state(db, authority, repo, task, version, verify_cmd, verifier):
         "main checkout required",
     )
     require(not git(repo, "status", "--porcelain"), "main worktree dirty")
+    _protect_operator_paths(repo, record)
     # Host-configured smudge/clean filters must never execute candidate attributes.
     filters = subprocess.run(
         ["git", "-C", str(repo), "config", "--get-regexp", r"^filter\."],
@@ -238,6 +240,38 @@ def _landing_state(db, authority, repo, task, version, verify_cmd, verifier):
     )
     require(filters.returncode == 1 and not filters.stdout, "host Git filters denied")
     return record
+
+
+def _protect_operator_paths(repo, record):
+    """Git status omits ignored files; reset must not replace operator-owned paths."""
+    tracked = {
+        name.decode("utf-8")
+        for name in git(repo, "ls-tree", "-r", "--name-only", "-z", record["base"]).split(b"\0")
+        if name
+    }
+    directories = {
+        "/".join(name.split("/")[:i]) for name in tracked for i in range(1, len(name.split("/")))
+    }
+    changed = git(
+        repo, "diff", "--name-only", "--no-renames", "-z", record["base"], record["commit"]
+    ).split(b"\0")
+    for raw in changed:
+        if not raw:
+            continue
+        parts = raw.decode("utf-8").split("/")
+        require(all(p not in ("", ".", "..", ".git") for p in parts), "unsafe landing path")
+        for i in range(1, len(parts) + 1):
+            name = "/".join(parts[:i])
+            path = repo / name
+            try:
+                meta = path.lstat()
+            except FileNotFoundError:
+                break
+            require(not stat.S_ISLNK(meta.st_mode), "linked operator path denied")
+            require(
+                name in (tracked if i == len(parts) else directories),
+                "untracked or ignored operator path exists",
+            )
 
 
 def _finish(db, task, version, record):
@@ -314,13 +348,16 @@ def reconcile(authority: Authority, repo: Path, task: str, version: int):
             and not git(repo, "status", "--porcelain"),
             "inspect and repair main checkout first",
         )
-        require(
-            head in (intent["base"], intent["commit_id"]),
-            "main diverged; manual reconciliation required",
+        ancestry = subprocess.run(
+            ["git", "-C", str(repo), "merge-base", "--is-ancestor", intent["commit_id"], head],
+            capture_output=True,
+            timeout=60,
         )
-        if head == intent["commit_id"]:
+        require(ancestry.returncode in (0, 1), "cannot determine landing ancestry")
+        if ancestry.returncode == 0:
             _finish(db, task, version, intent)
             return {"status": "landed-locally", "candidate": intent["candidate"]}
         db.execute("UPDATE jobs SET status='proposed' WHERE task=? AND version=?", (task, version))
+        db.execute("DELETE FROM reviews WHERE task=? AND version=?", (task, version))
         db.execute("DELETE FROM landing_intents WHERE task=? AND version=?", (task, version))
         return {"status": "proposal-retained", "candidate": intent["candidate"]}
