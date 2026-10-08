@@ -6,7 +6,7 @@ LABEL org.opencontainers.image.source="https://github.com/PhiBangKimNguyen/clodf
       org.opencontainers.image.revision="${FARM_REVISION}"
 ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8 \
     PATH=/opt/cli/node_modules/.bin:/opt/clodfarm/bin:$PATH PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 CLODFARM_NO_RELEASE=1 \
+    PYTHONDONTWRITEBYTECODE=1 PYTHONSAFEPATH=1 CLODFARM_NO_RELEASE=1 \
     DISABLE_AUTOUPDATER=1 FARM_CLAUDE_UPDATE=0 FARM_PUSH=0 \
     FARM_REMOTE_CONTROL=0 FARM_USAGE_REFRESH=0 FARM_UI=0 \
     FARM_WORKSPACE=/workspace CLAUDE_CONFIG_DIR=/home/farm/.claude \

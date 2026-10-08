@@ -30,7 +30,12 @@ default to zero in both image variants and example configuration. Explicit manua
 upgrades in the general image still accept a ref/source. The dogfood image seals
 `CLODFARM_NO_RELEASE=1`: boot ignores planted workspace releases, and every upgrade
 mutation (including rollback/UI restart) fails before filesystem/network activity.
-Read-only `upgrade --status` remains available. Update dogfood only by rebuilding a
+Read-only `upgrade --status` reports the image and preserves stale PID files.
+`PYTHONSAFEPATH=1` prevents working-directory imports. Sealed run and detached
+spawn entrypoints use isolated Python (`-I`) and the immutable installed shim,
+so planted neighbours in `.farm/shim` cannot execute. The installed-image check
+exercises both entrypoints, planted CWD/shim/release controls and status tree
+preservation; unsafe controls must execute their planted modules. Update dogfood only by rebuilding a
 reviewed full fork commit, inspecting its exported inventory and repeating cold
 reproduction and authority tests. Neither this
 change nor `FARM_PUSH=0` enforces the missing F1c landing/capability controls.
