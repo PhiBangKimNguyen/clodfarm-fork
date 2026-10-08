@@ -369,6 +369,7 @@ Every command takes `--json`.
 
 | Variable | Default | |
 |---|---|---|
+| `FARM_REQUIRE_ISOLATION` | enabled (also when unset) | secure default rejects legacy shared dispatch and landing; only explicit `0`, `false`, `off` or `no` opts out |
 | `FARM_MAX_WORKERS` | `3` | sub-agents one Claude may run at once (upper bound; the governor decides) |
 | `FARM_NAME` / `FARM_CLAUDE_NAME` | `clodfarm` / from the login | the farm's name / its own Claude's name (default: the login email before `@`) |
 | `FARM_USAGE_REFRESH` | `300` | re-measure an idle Claude's usage after this many seconds (0 = only from runs) |
@@ -483,3 +484,9 @@ Security issues: see [SECURITY.md](SECURITY.md).
 
 [MIT](LICENSE). clodfarm is an independent open-source project, not affiliated with or endorsed by Anthropic.
 "Claude" and "Claude Code" are trademarks of Anthropic, PBC.
+
+This fork defaults to isolation even in the general image. Its default command
+`clodfarm run` exits with "Legacy shared runner disabled" until an operator
+explicitly opts out, for example `docker run -e FARM_REQUIRE_ISOLATION=0 ...`.
+That opt-out permits the legacy shared runner and landing; it is not the F1c
+worker boundary. F1c uses its reviewed policy and Tier 0 entrypoint instead.

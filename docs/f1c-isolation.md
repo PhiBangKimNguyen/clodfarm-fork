@@ -1,7 +1,10 @@
 # F1c offline isolation and landing candidate
 
 This internal AgentRunway candidate depends on F1a fork PR #1 at
-`fc6e4206017f2ff868ff1cde61f95529d0b3f8b4`; acceptance remains pending.
+`7d995ca95202771eb66ceeb939cf9d7d0e2baa41`; acceptance remains pending.
+This historical candidate is behind the newer F1a fixes. Integrating a corrected
+F1a head requires new F1c source/image evidence and exact-head review. F1a evidence
+for a different revision does not attest this candidate.
 No route, scheduler, login or inference is enabled.
 
 Tier 0 runs `python -I -m clodfarm.tier0`, a closed JSON-lines tool executor,
@@ -107,8 +110,9 @@ F1C_SMOKE_IMAGE=sha256:<candidate-image-id> python -m unittest discover -s tests
 ```
 
 Portable smoke uses direct Docker CLI operations and a unique disposable volume.
-Only a synthetic bootstrap runs as root to set ownership; broker/workers run as
-UID 10001 and no test container gets the Docker socket. It checks real tools/RPC,
+Only a synthetic bootstrap runs as root to set ownership. The broker uses UID
+10002 and workers UID 10001, sharing only socket/output group 10001; no test
+container gets the Docker socket. It checks real tools/RPC,
 EROFS mounts, unreachable egress, absent private state/auth/other-worker mounts,
 CLI denial, broker restart/inbox/dispositions and invalid policy controls.
 Mock-verifier unit tests and synthetic smoke do not establish live acceptance.
@@ -122,9 +126,20 @@ The dogfood workflow checks out the PR head, uses that exact revision as
 `FARM_REVISION`, runs both a real failing verifier (`exit 3`) and a passing
 command requiring `/workspace/proposal.txt`, and retains the tested image plus
 revision/run metadata. AgentRunway pins that CI-produced image instead of
-claiming independent apt/pip builds reproduce the same digest. Dispatch the same
-workflow with `companion_sha` and `image_run_id` to reproduce the committed
-Compose and run its actual broker/worker through host-side prepare/candidate/land.
-This explicit synthetic run starts no scheduler, login, model call or notification.
-A successful cross-repository run is recorded against both exact heads and the
-image ID; it does not accept live terms/host gates.
+claiming independent apt/pip builds reproduce the same digest. The supported
+cross-repository check is dispatched from the private AgentRunway repository:
+
+```sh
+gh workflow run farm-foundation.yml --repo PhiBangKimNguyen/AgentRunway \
+  --ref <reviewed-AgentRunway-ref> -f validation=f1c \
+  -f image_run_id=<successful-fork-image-run>
+```
+
+Run CI only after the PR is ready and Claude approves its exact current head.
+The private caller can read AgentRunway; the fork token cannot. AgentRunway's
+workflow binds the tested config digest to the exported OCI manifest digest and
+uses the containerd image store. It reproduces committed Compose and exercises
+host prepare/candidate/land without a scheduler, login, model call or notification.
+A successful run records both exact heads; it does not accept live terms/host gates.
+The removed fork dispatch failed SHA validation in run 37589362934 and private
+checkout in run 37589427465. Neither is passing or billing-blocked evidence.

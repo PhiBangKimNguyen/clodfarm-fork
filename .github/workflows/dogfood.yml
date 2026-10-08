@@ -2,25 +2,11 @@ name: Pinned dogfood runtime
 on:
   pull_request:
   workflow_dispatch:
-    inputs:
-      companion_sha:
-        description: 'Optional exact AgentRunway head for rendered deployment validation'
-        default: ''
-      image_run_id:
-        description: 'Successful image-producing run for companion validation'
-        default: ''
 permissions:
   contents: read
   actions: read
 jobs:
-  companion:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.companion_sha != '' }}
-    uses: ./.github/workflows/f1c-companion.yml
-    with:
-      agentrunway_sha: ${{ inputs.companion_sha }}
-      image_run_id: ${{ inputs.image_run_id }}
   offline-runtime:
-    if: ${{ inputs.companion_sha == '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,7 +38,8 @@ jobs:
       - name: F1c exact-candidate landing with real isolated verifier
         run: |
           pip install -e '.[test]'
-          export F1C_SMOKE_IMAGE=$(docker image inspect clodfarm-dogfood:check --format '{{.Id}}')
+          F1C_SMOKE_IMAGE=$(docker image inspect clodfarm-dogfood:check --format '{{.Id}}')
+          export F1C_SMOKE_IMAGE
           python -m unittest discover -s tests -p test_f1c.py
       - uses: actions/upload-artifact@v4
         with:
