@@ -76,9 +76,29 @@ def main():
             time.sleep(0.05)
         assert completed.exists() and not marker.exists()
         completed.unlink()
-        handle = runner.start_run(str(workspace), str(workspace / ".farm/test-run"),
-                                  cmd, str(workspace), dict(os.environ))
-        assert handle.wait(10) == 0 and completed.exists() and not marker.exists()
+        # F1c must reject the legacy path before persisting any run state.
+        rundir = workspace / ".farm/test-run"
+        if os.environ.get("FARM_REQUIRE_ISOLATION") == "1":
+            try:
+                runner.start_run(str(workspace), str(rundir), cmd, str(workspace), dict(os.environ))
+            except ValueError as exc:
+                assert "Shared run shim" in str(exc)
+            else:
+                raise AssertionError("isolated image allowed legacy runner")
+            assert not rundir.exists()
+        # The foundation's import test intentionally opts out in this disposable
+        # probe process only; the candidate image and worker defaults stay sealed.
+        original_isolation = os.environ.get("FARM_REQUIRE_ISOLATION")
+        os.environ["FARM_REQUIRE_ISOLATION"] = "0"
+        try:
+            handle = runner.start_run(str(workspace), str(rundir), cmd,
+                                      str(workspace), dict(os.environ))
+            assert handle.wait(10) == 0 and completed.exists() and not marker.exists()
+        finally:
+            if original_isolation is None:
+                os.environ.pop("FARM_REQUIRE_ISOLATION", None)
+            else:
+                os.environ["FARM_REQUIRE_ISOLATION"] = original_isolation
         # The old writable shim invocation must expose its planted neighbour.
         result = subprocess.run([sys.executable, procs.shim_path(str(workspace)), "exec", "unused"],
                                 env=unsafe, capture_output=True, text=True)

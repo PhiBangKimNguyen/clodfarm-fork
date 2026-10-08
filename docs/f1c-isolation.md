@@ -1,10 +1,10 @@
 # F1c offline isolation and landing candidate
 
 This internal AgentRunway candidate depends on F1a fork PR #1 at
-`7d995ca95202771eb66ceeb939cf9d7d0e2baa41`; acceptance remains pending.
-This historical candidate is behind the newer F1a fixes. Integrating a corrected
-F1a head requires new F1c source/image evidence and exact-head review. F1a evidence
-for a different revision does not attest this candidate.
+`4a09ab1bb082d53501a32ee0cd7f37f48716d46e`, independently approved as source.
+The integrated F1c head requires its own source/image evidence and exact-head
+review; acceptance remains pending. Historical evidence at `acac524` on base
+`7d995ca` does not attest this candidate, nor does F1a evidence for another image.
 No route, scheduler, login or inference is enabled.
 
 Tier 0 runs `python -I -m clodfarm.tier0`, a closed JSON-lines tool executor,
@@ -108,7 +108,7 @@ the approved-host F2 recovery control remains pending.
 python -m unittest discover -s tests -p 'test_f1c*.py'
 python scripts/f1c_desktop_smoke.py --image sha256:<candidate-image-id>
 # The actual landing adapter needs native Linux Docker integration:
-F1C_SMOKE_IMAGE=sha256:<candidate-image-id> python -m unittest discover -s tests -p test_f1c.py
+F1C_SMOKE_IMAGE=sha256:<candidate-image-id> python -m unittest discover -s tests -p 'test_f1c*.py'
 ```
 
 Portable smoke uses direct Docker CLI operations and a unique disposable volume.

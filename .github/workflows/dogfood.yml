@@ -62,4 +62,4 @@ jobs:
           docker run --rm --network=none --read-only
           --tmpfs /tmp:rw,nosuid,size=32m,uid=10001,gid=10001
           --mount type=bind,source="$PWD/tests/dogfood_image_check.py",target=/check.py,readonly
-          clodfarm-dogfood:check python /check.py
+          clodfarm-dogfood:check python -I /check.py
