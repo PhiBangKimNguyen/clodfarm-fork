@@ -21,6 +21,13 @@ from . import runshim
 SHIM = f"runshim-v{runshim.PROTOCOL}.py"
 
 
+def shim_command(workspace: str) -> list[str]:
+    """Sealed runs execute immutable image code with isolated Python imports."""
+    if os.environ.get("CLODFARM_NO_RELEASE"):
+        return [sys.executable, "-I", runshim.__file__]
+    return [sys.executable, shim_path(workspace)]
+
+
 def farm_dir(workspace: str) -> str:
     return os.path.join(workspace, ".farm")
 
@@ -146,7 +153,7 @@ def spawn_detached(workspace: str, argv: list[str], env: dict | None = None, log
         except OSError:
             pass
     try:
-        subprocess.run([sys.executable, shim_path(workspace), "exec", specf], check=True, timeout=30,
+        subprocess.run([*shim_command(workspace), "exec", specf], check=True, timeout=30,
                        stdin=subprocess.DEVNULL, pass_fds=pass_fds)
         if not pidfile:
             return 0

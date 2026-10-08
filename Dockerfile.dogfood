@@ -6,7 +6,7 @@ LABEL org.opencontainers.image.source="https://github.com/PhiBangKimNguyen/clodf
       org.opencontainers.image.revision="${FARM_REVISION}"
 ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8 \
     PATH=/opt/cli/node_modules/.bin:/opt/clodfarm/bin:$PATH PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 CLODFARM_NO_RELEASE=1 \
+    PYTHONDONTWRITEBYTECODE=1 PYTHONSAFEPATH=1 CLODFARM_NO_RELEASE=1 \
     DISABLE_AUTOUPDATER=1 FARM_CLAUDE_UPDATE=0 FARM_PUSH=0 \
     FARM_REMOTE_CONTROL=0 FARM_USAGE_REFRESH=0 FARM_UI=0 \
     FARM_REQUIRE_ISOLATION=1 FARM_UI_PRIVATE=1 \
@@ -31,7 +31,9 @@ RUN python3 -m venv /opt/clodfarm \
     && pip install --no-compile --no-cache-dir --require-hashes -r /tmp/requirements.txt
 # Official, unmodified CLI packages; no login or inference during build.
 COPY dogfood-cli/package.json dogfood-cli/package-lock.json /opt/cli/
-RUN npm ci --prefix /opt/cli --no-fund --no-audit \
+# Native archives can exceed npm's five-minute request default on slow links.
+# Keep a bounded fifteen-minute request timeout; lock integrity and CLI guards stay on.
+RUN npm ci --prefix /opt/cli --no-fund --no-audit --fetch-timeout=900000 \
     && npm cache clean --force \
     && claude --version | grep -F '2.1.288' \
     && codex --version | grep -F '0.160.0'

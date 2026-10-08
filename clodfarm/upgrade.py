@@ -61,7 +61,7 @@ def ui_pids(workspace: str) -> list[int]:
         pass
     c = _C()
     c.workspace = workspace
-    return [int(d["pid"]) for d in UIKeeper(c).running()]
+    return [int(d["pid"]) for d in UIKeeper(c).running(cleanup=False)]
 
 
 def status(workspace: str) -> str:

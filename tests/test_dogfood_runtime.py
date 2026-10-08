@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from clodfarm import boot, config, upgrade
+from clodfarm import boot, config, procs, runshim, upgrade
 
 
 def docker_environment(text):
@@ -92,6 +92,29 @@ def test_dogfood_upgrade_status_is_read_only(monkeypatch):
     monkeypatch.setenv("CLODFARM_NO_RELEASE", "1")
     monkeypatch.setattr(upgrade, "status", lambda workspace: "image")
     assert upgrade.main(SimpleNamespace(workspace="unused"), SimpleNamespace(status=True)) == 0
+
+
+def test_sealed_target_and_shim_ignore_workspace(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLODFARM_NO_RELEASE", "1")
+    assert boot.target(str(tmp_path)) == ""
+    assert procs.shim_command(str(tmp_path))[1:] == ["-I", runshim.__file__]
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_real_status_retains_stale_pid(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLODFARM_NO_RELEASE", "1")
+    stale = tmp_path / ".farm/pids/ui-stale.json"
+    stale.parent.mkdir(parents=True)
+    stale.write_text('{"pid":0,"started":0}')
+    assert "current release: image (" in upgrade.status(str(tmp_path))
+    assert stale.read_text() == '{"pid":0,"started":0}'
+
+
+def test_dogfood_safe_path_is_sealed():
+    root = Path(__file__).resolve().parents[1]
+    values, assignments = docker_environment((root / "Dockerfile.dogfood").read_text())
+    assert values["PYTHONSAFEPATH"] == "1"
+    assert assignments.count("PYTHONSAFEPATH") == 1
 
 
 def test_dogfood_has_exact_native_cli_versions():
