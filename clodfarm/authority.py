@@ -46,8 +46,13 @@ REASON_AUTHORITY = {
 
 
 class Authority:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, read_only=False):
         self.path = path
+        self.read_only = read_only
+        if read_only:
+            require(not path.is_symlink(), "linked state denied")
+            require(path.is_file(), "supervisor authority database missing")
+            return
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         require(not path.is_symlink(), "linked state denied")
         with self.connect() as db:
@@ -78,7 +83,10 @@ class Authority:
 
     @contextlib.contextmanager
     def connect(self):
-        db = sqlite3.connect(self.path, timeout=30)
+        db = (
+            sqlite3.connect(self.path.absolute().as_uri() + "?mode=ro", uri=True, timeout=30)
+            if self.read_only else sqlite3.connect(self.path, timeout=30)
+        )
         db.row_factory = sqlite3.Row
         try:
             with db:

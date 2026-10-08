@@ -4,7 +4,6 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
-  actions: read
 jobs:
   offline-runtime:
     runs-on: ubuntu-latest
@@ -40,7 +39,7 @@ jobs:
           pip install -e '.[test]'
           F1C_SMOKE_IMAGE=$(docker image inspect clodfarm-dogfood:check --format '{{.Id}}')
           export F1C_SMOKE_IMAGE
-          python -m unittest discover -s tests -p test_f1c.py
+          python -m unittest discover -s tests -p 'test_f1c*.py'
       - uses: actions/upload-artifact@v4
         with:
           name: f1c-ci-metadata-${{ github.event.pull_request.head.sha || github.sha }}

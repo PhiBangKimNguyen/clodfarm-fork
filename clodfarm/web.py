@@ -39,6 +39,7 @@ import os
 import re
 import secrets
 import socket
+import sqlite3
 import threading
 import time
 from http import HTTPStatus
@@ -1181,9 +1182,13 @@ def make_handler(ui: FarmUI):
         def _manager_view(self) -> dict:
             st = ui.store.settings()
             inbox = []
+            escalations_unavailable = False
             if os.environ.get("FARM_AUTHORITY_DB"):
                 from .f1c import manager_authority
-                inbox = manager_authority().inbox()
+                try:
+                    inbox = manager_authority(read_only=True).inbox()
+                except (ValueError, OSError, sqlite3.Error):
+                    escalations_unavailable = True
             owners = [{"id": c["id"], "owned": bool(c.get("owned")), "approve_missions": bool(c.get("approve_missions"))}
                       for c in ui.store.claudes()]
             return {"settings": {k: st.get(k) for k in ("private", "hatch_open", "max_claudes", "hatch_per_ip_hour")}
@@ -1191,6 +1196,7 @@ def make_handler(ui: FarmUI):
                        "private_by_host": os.environ.get("FARM_UI_PRIVATE") == "1", "plan_claudes": ui.manager.max_claudes()},
                     "planner": ui.store.planner(), "claudes": owners, "release": boot.running(),
                     "managers": ui.managers(st), "escalations": inbox,
+                    "escalations_unavailable": escalations_unavailable,
                     "version": __version__, "hosts": [a["id"] for a in ui.manager.all()]}
 
         # ---------------------------------------------------------- POST

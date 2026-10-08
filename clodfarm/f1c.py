@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import os
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -19,11 +20,11 @@ from .isolation import tier0
 from .tier0 import load_policy, require
 
 
-def manager_authority():
+def manager_authority(*, read_only=False):
     require(not tier0(), "worker administration denied")
     path = os.environ.get("FARM_AUTHORITY_DB", "")
     require(path and Path(path).is_absolute(), "supervisor authority database required")
-    return Authority(Path(path))
+    return Authority(Path(path), read_only=read_only)
 
 
 def main(argv=None):
@@ -63,7 +64,7 @@ def main(argv=None):
         if name in ("candidate", "review", "land"):
             p.add_argument("--verifier-image", required=True)
     args = parser.parse_args(argv)
-    authority = manager_authority()
+    authority = manager_authority(read_only=args.command == "inbox")
     if args.command == "register":
         roots = [p.resolve() for p in (args.input, args.output)]
         for root in roots:
@@ -166,6 +167,6 @@ def main(argv=None):
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except (ValueError, OSError, KeyError, TypeError):
+    except (ValueError, OSError, KeyError, TypeError, sqlite3.Error):
         print("F1c operation denied; inspect the local candidate and gate inputs.", file=sys.stderr)
         sys.exit(1)

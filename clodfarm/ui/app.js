@@ -3377,7 +3377,9 @@ const UI = {
               try { this.renderManager(await api("api/manager/escalation", { id: item.id, action })); }
               catch (error) { escalationError.textContent = error.message; }
             } }))) : null)),
-      !(m.escalations || []).length ? h("p", { class: "muted small", text: "No worker escalations." }) : null,
+      m.escalations_unavailable
+        ? h("p", { class: "small", text: "Worker inbox unavailable. Check the authority database path and access." })
+        : !(m.escalations || []).length ? h("p", { class: "muted small", text: "No worker escalations." }) : null,
       escalationError);
     fill($("#mgr-body"), managers, escalations, invite, planner, privacy, hatching, owners, release);
   },

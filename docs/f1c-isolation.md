@@ -46,7 +46,9 @@ Proposal contents remain in private output and the trusted candidate Git tree.
 
 Escalation pauses work. Ordinary questions go to parent Claude; credential, budget,
 policy, terms and external-action decisions go to the human inbox.
-`python -I -m clodfarm.f1c inbox` is a read-only trusted CLI view. The private manager
+`python -I -m clodfarm.f1c inbox` opens an existing authority database in SQLite
+read-only mode, with no schema or permission changes. Missing or inaccessible
+state is an explicit error; the manager page shows an unavailable inbox. The private manager
 UI shows destinations, task/version, evidence, age and dispositions. Acknowledgement
 does not resume work. Human dispositions name the operator; parent Claude cannot
 decide human authority requests. Workers cannot approve or retry. SQLite records

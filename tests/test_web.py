@@ -397,3 +397,31 @@ def test_f1c_manager_cannot_open_privacy_hatching_invites_or_legacy_planner(ui, 
                        ("invite", {}), ("planner", {"on": True, "goal": "synthetic"})):
         assert manager(base + "/api/manager/" + path, body)[0] == 403
     assert manager(base + "/api/agents", {"name": "blocked"})[0] == 403
+
+
+@pytest.mark.parametrize("failure", ["missing", "invalid", "permission"])
+def test_f1c_manager_reports_unavailable_inbox(ui, monkeypatch, tmp_path, failure):
+    import sqlite3
+    from clodfarm.authority import Authority
+
+    base, _ = ui
+    path = tmp_path / "missing" / "authority.db"
+    if failure == "invalid":
+        path.parent.mkdir()
+        path.write_bytes(b"invalid database")
+    elif failure == "permission":
+        Authority(path)
+        original_connect = sqlite3.connect
+        def denied(database, *args, **kwargs):
+            if kwargs.get("uri") and str(database).startswith(path.as_uri()):
+                raise sqlite3.OperationalError("unable to open database file")
+            return original_connect(database, *args, **kwargs)
+        monkeypatch.setattr(sqlite3, "connect", denied)
+    monkeypatch.setenv("FARM_AUTHORITY_DB", str(path))
+    manager = client()
+    login(manager, base)
+    code, view, _ = manager(base + "/api/manager")
+    assert code == 200 and view["escalations_unavailable"] is True
+    assert view["escalations"] == []
+    if failure == "missing":
+        assert not path.parent.exists()

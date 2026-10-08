@@ -820,12 +820,26 @@ class LandingTests(JobFixture):
         with self.assertRaisesRegex(Denied, "verification failed"):
             land(self.authority, self.repo, "job-one", 1, "exit 3", DockerVerifier(image))
         self.assertEqual(git(self.repo, "rev-parse", "HEAD"), self.base)
-        command = (
-            'test -f /workspace/proposal.txt && python -c "import os; '
-            "assert not os.path.exists('/candidate/.git'); "
-            "assert 'F1C_PRIVATE_SENTINEL' not in os.environ; "
-            "assert not os.path.exists('/rpc/task.sock')\""
-        )
+        command = """test -f /workspace/proposal.txt && python -I - <<'PY'
+import errno, os, socket
+assert not os.path.exists('/candidate/.git')
+assert 'F1C_PRIVATE_SENTINEL' not in os.environ
+assert not os.path.exists('/rpc/task.sock')
+assert os.listdir('/sys/class/net') == ['lo']
+try:
+    os.mkdir('/f1c-denied-root')
+except OSError as exc:
+    assert exc.errno == errno.EROFS, exc
+else:
+    raise AssertionError('verifier root writable')
+try:
+    socket.create_connection(('1.1.1.1', 443), timeout=1)
+except OSError as exc:
+    assert exc.errno == errno.ENETUNREACH, exc
+else:
+    raise AssertionError('verifier egress permitted')
+PY
+"""
         os.environ["F1C_PRIVATE_SENTINEL"] = "must-never-enter-verifier"
         self.addCleanup(os.environ.pop, "F1C_PRIVATE_SENTINEL", None)
         self.record(cmd=command, image=image)
