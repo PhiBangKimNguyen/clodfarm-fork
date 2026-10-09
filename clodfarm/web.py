@@ -39,12 +39,15 @@ import os
 import re
 import secrets
 import socket
+import sqlite3
 import threading
 import time
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
+
+from .isolation import isolation_required
 
 from . import __version__, boot, bots, browser, connectors, dashboards, policy, sso
 from . import mcp
@@ -473,7 +476,7 @@ class FarmUI:
     def private(self, st: dict | None = None) -> bool:
         """Only signed-in people watch: the manager made it private, or its host did (FARM_UI_PRIVATE=1)."""
         st = st if st is not None else self.store.settings()
-        return bool(st.get("private")) or os.environ.get("FARM_UI_PRIVATE") == "1"
+        return bool(st.get("private")) or os.environ.get("FARM_UI_PRIVATE") == "1" or isolation_required()
 
     def managers(self, st: dict | None = None) -> list[str]:
         """The Claudes whose persons run the farm: the farm's own (first) Claude until a manager changes it."""
@@ -1118,6 +1121,8 @@ def make_handler(ui: FarmUI):
             return got[0] if got and ui.store.invite(got[0]) else None
 
         def _hatch_invited(self, data: dict):
+            if isolation_required():
+                return self._err(403, "isolated farm hatching is closed")
             """POST /api/agents {invite: true}: the invited person's own Claude, waiting for their login."""
             th = self._invited()
             if not th:
@@ -1147,6 +1152,8 @@ def make_handler(ui: FarmUI):
             self.wfile.write(body)
 
         def _hatch_view(self, who: Who) -> dict:
+            if isolation_required():
+                return {"can": False, "why": "isolated farm hatching is closed", "claudes": 0, "max": 0}
             st = ui.store.settings()
             n = len([a for a in ui.manager.all() if not a.get("primary")])
             cap = ui.manager.max_claudes()  # the host's plan: a ceiling for everyone, the manager too
@@ -1174,13 +1181,22 @@ def make_handler(ui: FarmUI):
 
         def _manager_view(self) -> dict:
             st = ui.store.settings()
+            inbox = []
+            escalations_unavailable = False
+            if os.environ.get("FARM_AUTHORITY_DB"):
+                from .f1c import manager_authority
+                try:
+                    inbox = manager_authority(read_only=True).inbox()
+                except (ValueError, OSError, sqlite3.Error):
+                    escalations_unavailable = True
             owners = [{"id": c["id"], "owned": bool(c.get("owned")), "approve_missions": bool(c.get("approve_missions"))}
                       for c in ui.store.claudes()]
             return {"settings": {k: st.get(k) for k in ("private", "hatch_open", "max_claudes", "hatch_per_ip_hour")}
                     | {"private": ui.private(st),
                        "private_by_host": os.environ.get("FARM_UI_PRIVATE") == "1", "plan_claudes": ui.manager.max_claudes()},
                     "planner": ui.store.planner(), "claudes": owners, "release": boot.running(),
-                    "managers": ui.managers(st),
+                    "managers": ui.managers(st), "escalations": inbox,
+                    "escalations_unavailable": escalations_unavailable,
                     "version": __version__, "hosts": [a["id"] for a in ui.manager.all()]}
 
         # ---------------------------------------------------------- POST
@@ -1389,6 +1405,8 @@ def make_handler(ui: FarmUI):
             """A new Claude (or bot). Anyone who may watch the farm hatches one, once: the browser that hatched it
             gets its owner cookie. The person chooses its skin, whether they approve every mission sent to it, and
             which tools it may use."""
+            if isolation_required():
+                return self._err(403, "isolated farm hatching is closed")
             store, mgr = ui.store, ui.manager
             hv = self._hatch_view(who)
             if not hv["can"]:
@@ -1427,6 +1445,16 @@ def make_handler(ui: FarmUI):
 
         def _manager_post(self, path: str, data: dict):
             store = ui.store
+            if path == "/api/manager/escalation":
+                from .f1c import manager_authority
+                manager_authority().disposition(data.get("id"), "human-manager:" + (self._who().owner or ui.cfg.name), data.get("action"))
+                return self._json(self._manager_view())
+            if isolation_required() and (
+                path == "/api/manager/invite" or data.get("private") is False or data.get("hatch_open") is True
+                or any(k in data and type(data[k]) is not bool for k in ("private", "hatch_open"))
+                or (path == "/api/manager/planner" and data.get("on"))
+            ):
+                return self._err(403, "isolated farm privacy, hatching and dispatch gates are locked")
             if path == "/api/manager/settings":
                 ch = {}
                 if "private" in data:

@@ -9,18 +9,57 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Build credential-free Linux candidate
-        run: >-
-          docker build --platform linux/amd64 -f Dockerfile.dogfood
-          --build-arg FARM_REVISION="$GITHUB_SHA" -t clodfarm-dogfood:check .
+        run: |
+          revision=$(git rev-parse HEAD)
+          docker build --platform linux/amd64 -f Dockerfile.dogfood --build-arg FARM_REVISION="$revision" -t clodfarm-dogfood:check .
+          image=$(docker image inspect clodfarm-dogfood:check --format '{{.Id}}')
+          python3 - "$revision" "$image" <<'PY'
+          import json, sys
+          from pathlib import Path
+          Path('f1c-ci-image.json').write_text(json.dumps({'format':'clodfarm.ci-image/v1', 'revision':sys.argv[1], 'image':sys.argv[2], 'run_id':'${{ github.run_id }}', 'run_attempt':'${{ github.run_attempt }}'}, indent=2)+'\n')
+          PY
       - name: Verify pinned native versions and fork source without network
         run: |
           docker run --rm --network=none --read-only clodfarm-dogfood:check claude --version | grep -F '2.1.288'
           docker run --rm --network=none --read-only clodfarm-dogfood:check codex --version | grep -F '0.160.0'
           docker run --rm --network=none --read-only clodfarm-dogfood:check python -c 'import os; from clodfarm.upgrade import REPO; assert REPO == "https://github.com/PhiBangKimNguyen/clodfarm-fork"; assert os.environ["FARM_CLAUDE_UPDATE"] == "0"'
+      - name: F1c actual container and restart controls
+        run: |
+          image=$(docker image inspect clodfarm-dogfood:check --format '{{.Id}}')
+          python3 scripts/f1c_image_source.py --image "$image" > f1c-image-source.json
+          python3 scripts/f1c_desktop_smoke.py --image "$image" | tee f1c-smoke.json
+      - name: F1c exact-candidate landing with real isolated verifier
+        run: |
+          pip install -e '.[test]'
+          F1C_SMOKE_IMAGE=$(docker image inspect clodfarm-dogfood:check --format '{{.Id}}')
+          export F1C_SMOKE_IMAGE
+          python -m unittest discover -s tests -p 'test_f1c*.py'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: f1c-ci-metadata-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            f1c-ci-image.json
+            f1c-image-source.json
+            f1c-smoke.json
+          retention-days: 90
+      - name: Preserve tested head image for companion pinning
+        run: docker save clodfarm-dogfood:check | gzip > f1c-ci-image.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: f1c-ci-image-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            f1c-ci-image.json
+            f1c-ci-image.tar.gz
+          retention-days: 90
       - name: Reject writable-workspace release overrides and upgrades offline
         run: >-
           docker run --rm --network=none --read-only
           --tmpfs /tmp:rw,nosuid,size=32m,uid=10001,gid=10001
           --mount type=bind,source="$PWD/tests/dogfood_image_check.py",target=/check.py,readonly
-          clodfarm-dogfood:check python /check.py
+          clodfarm-dogfood:check python -I /check.py

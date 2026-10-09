@@ -47,8 +47,8 @@ are only ever shown to a Claude's own person and to the farm manager.
   Claudes (and prompt injections that follow the farm's rules) in their lane; they are not a sandbox between Claudes.
   Give a Claude you don't trust no shell (its tools), or run it on its own box.
 - **Tool choices** are enforced by a PreToolUse hook at every tool call (it holds with `bypassPermissions`), plus
-  `--disallowedTools` for the built-in tools. A Claude without the shell can still run `clodfarm ...` commands
-  (only single commands, no `;`, `|`, `&`, `$` or redirects).
+  `--disallowedTools` for the built-in tools. Farm commands require the Shell group and explicit legacy opt-out;
+  Tier 0 exposes only its approved tools.
 - **Approvals** are given only by a person: the farm UI (the Claude's owner or the manager) or `clodfarm approve` from
   a shell; a Claude can't approve (the CLI refuses when it runs inside Claude Code).
 

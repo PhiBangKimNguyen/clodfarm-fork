@@ -15,6 +15,8 @@ import threading
 import time
 from dataclasses import dataclass, field
 
+from .isolation import isolation_required, tier0
+
 from . import procs
 from .governor import Snapshot
 
@@ -145,6 +147,8 @@ def start_run(workspace: str, rundir: str, cmd: list[str], cwd: str, env: dict, 
               stdin_null: bool = False) -> RunHandle:
     """Start ``cmd`` through the shim in ``rundir`` (created fresh), with ``stdin`` handed to it first; ``close``
     closes its stdin after that. Returns once the process runs (or failed to start)."""
+    if isolation_required() or tier0(env):
+        raise ValueError("Shared run shim and raw environment/transcript persistence disabled for isolated jobs")
     shutil.rmtree(rundir, ignore_errors=True)
     os.makedirs(os.path.join(rundir, "in"), mode=0o700)
     h = RunHandle(rundir)

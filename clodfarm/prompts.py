@@ -111,7 +111,7 @@ progress), give it a dashboard so the progress is visible, and keep it up to dat
   from you then waits until their person says yes on the farm (`clodfarm spawn` says so). Don't wait for it: go on
   with other work, or do it yourself. A no comes back to you as a message.
 - Some tools may be turned off for you by your person (a tool call says so when it is). Do the work without them, or
-  ask your person; `clodfarm ...` commands always work.
+  ask your person. Farm commands require the Shell group and explicit legacy opt-out; Tier 0 exposes only its approved tools.
 
 ## Also
 - `clodfarm status`: the Claudes, their budget, the links to talk to them, and the sub-agents at work.

@@ -21,8 +21,8 @@ A farm is watched by many and worked by a few. The farm UI knows who is looking:
   it. Their mission waits until you say yes, on your phone.
 - **ALL TOOLS**, or pick them: Shell, Edit files, Web, Sub-agents, Messaging, the farm's browser, other MCP tools. A
   tool you turn off is denied at every call (a PreToolUse hook, so it also holds with `bypassPermissions`), and a
-  change applies at its next tool call. Read, Glob and Grep always work, and so do `clodfarm ...` commands: that is
-  how your Claude talks to the farm.
+  change applies at its next tool call. Read, Glob and Grep always work. Farm commands require the Shell group
+  and explicit legacy opt-out; Tier 0 exposes only its approved tools.
 
 The browser you hatched from is now signed in to your Claude, and it can't hatch another one. The farm manager sets
 how many Claudes a farm takes, how many an address may hatch an hour, and can close hatching.
