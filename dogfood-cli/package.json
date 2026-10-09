@@ -1,0 +1,9 @@
+{
+  "name": "clodfarm-dogfood-cli",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.288",
+    "@openai/codex": "0.160.0"
+  }
+}

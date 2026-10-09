@@ -374,7 +374,7 @@ Every command takes `--json`.
 | `FARM_USAGE_REFRESH` | `300` | re-measure an idle Claude's usage after this many seconds (0 = only from runs) |
 | `FARM_TZ` | `UTC` | default time zone for `clodfarm schedule` |
 | `FARM_MODEL` / `FARM_EFFORT` | `opus` / default | model and effort for every agent, and the default model of the sessions you open from the Claude app |
-| `FARM_CLAUDE_UPDATE` | `3600` | update Claude Code to its newest release every this many seconds (0 = never), so new models arrive the day they ship |
+| `FARM_CLAUDE_UPDATE` | `0` | unattended Claude Code updates are off by default; a nonzero value opts into this interval in seconds |
 | `FARM_WEEKLY_TARGET` | `0.80` | agents stop at 80% of the weekly window |
 | `FARM_FIVE_HOUR_CEILING` | `0.85` | max share of a 5-hour window |
 | `FARM_DAILY_BUDGET_USD` | `0` | API-key mode: daily cap (0 = none) |

@@ -32,7 +32,7 @@ class Config:
     model: str
     permission_mode: str
     claude_bin: str
-    claude_update: int  # update Claude Code to the newest release every this many seconds (0 = never; image: 3600)
+    claude_update: int  # update Claude Code every this many seconds (0 = never; validation default)
     task_timeout: int
     lease_seconds: int
     remote_control: bool

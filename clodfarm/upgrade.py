@@ -21,7 +21,7 @@ import time
 
 from . import __version__, boot, procs
 
-REPO = "https://github.com/matank001/clodfarm"
+REPO = "https://github.com/PhiBangKimNguyen/clodfarm-fork"
 KEEP = 3
 
 
@@ -61,7 +61,7 @@ def ui_pids(workspace: str) -> list[int]:
         pass
     c = _C()
     c.workspace = workspace
-    return [int(d["pid"]) for d in UIKeeper(c).running()]
+    return [int(d["pid"]) for d in UIKeeper(c).running(cleanup=False)]
 
 
 def status(workspace: str) -> str:
@@ -214,6 +214,10 @@ def hand_over(workspace: str, wait: int) -> bool:
 
 def main(cfg, a) -> int:
     ws = cfg.workspace
+    # The dogfood image is immutable: even a SHA-pinned in-place install would
+    # write an unsealed workspace release that boot deliberately ignores.
+    if os.environ.get("CLODFARM_NO_RELEASE") and not a.status:
+        raise SystemExit("clodfarm upgrade: workspace releases are disabled; rebuild a reviewed pinned image")
     if a.status:
         print(status(ws))
         return 0

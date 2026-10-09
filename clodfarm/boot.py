@@ -25,6 +25,8 @@ def releases_dir(workspace: str | None = None) -> str:
 
 def target(workspace: str | None = None) -> str:
     """The release every process should run: the real path of ``current``, or "" for the image's own code."""
+    if os.environ.get("CLODFARM_NO_RELEASE"):
+        return ""
     cur = os.path.join(releases_dir(workspace), "current")
     real = os.path.realpath(cur)
     return real if os.path.islink(cur) and os.path.isdir(os.path.join(real, "lib", "clodfarm")) else ""
@@ -142,7 +144,7 @@ def boot(argv: list[str] | None = None):
 
 
 # `python -m` would put the working directory first on sys.path, ahead of the release; this doesn't
-STUB = "import sys; sys.path[:1] = []; from clodfarm.boot import main; main()"
+STUB = "import sys; sys.path[:] = [p for p in sys.path if p != '']; from clodfarm.boot import main; main()"
 
 
 def command(argv: list[str]) -> list[str]:

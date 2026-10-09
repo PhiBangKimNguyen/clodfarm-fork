@@ -62,7 +62,7 @@ class UIKeeper:
         self._lock = threading.Lock()
         self.roll_file = os.path.join(self.dir, "ui-roll")
 
-    def running(self) -> list[dict]:
+    def running(self, *, cleanup: bool = True) -> list[dict]:
         """The UI processes up now: [{pid, tag, release, ready, path}], oldest first."""
         out = []
         try:
@@ -77,7 +77,7 @@ class UIKeeper:
             tag = d.get("tag") or ""
             if tag and procs.alive(d.get("pid"), f"--tag {tag}"):
                 out.append({**d, "path": path})
-            elif time.time() - float(d.get("started") or 0) > READY_WAIT:
+            elif cleanup and time.time() - float(d.get("started") or 0) > READY_WAIT:
                 try:
                     os.remove(path)
                 except OSError:

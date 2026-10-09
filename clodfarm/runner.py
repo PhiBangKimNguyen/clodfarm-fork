@@ -11,7 +11,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -159,7 +158,7 @@ def start_run(workspace: str, rundir: str, cmd: list[str], cwd: str, env: dict, 
     procs.write_json(os.path.join(rundir, "cmd.json"), {"argv": cmd, "cwd": cwd, "env": env,
                                                         "merge_stderr": merge_stderr,
                                                         **({"stdin": "null"} if stdin_null else {})})
-    subprocess.run([sys.executable, procs.shim_path(workspace), "run", rundir], check=True, timeout=60,
+    subprocess.run([*procs.shim_command(workspace), "run", rundir], check=True, timeout=60,
                    stdin=subprocess.DEVNULL)
     t0 = time.time()
     while not h.started() and not h.rc() and time.time() - t0 < 30:
